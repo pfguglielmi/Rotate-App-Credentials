@@ -16,16 +16,16 @@
 .PARAMETER AuthMethod
     Specifies the authentication method ('ManagedIdentity', 'ServicePrincipal', or 'Interactive').
 .PARAMETER CredentialType
-    Specifies the type of credential to rotate ('Secrets', 'Certificates', or 'Both').
+    Specifies the type of credential to rotate ('Secret', 'Certificate', or 'Both').
 .PARAMETER NotificationType
     Specifies the notification method ('Teams', 'Email', or 'None').
 .EXAMPLE
     # Rotate expiring secrets for all apps using interactive user login and store them in Key Vault
-    .\Rotate-App-Credentials.ps1 -SelectionMethod Expiration -AuthMethod Interactive -CredentialType Secrets -KeyVaultName 'my-prod-kv' -NotificationType Teams -TeamsWebhookUrl 'https://...'
+    .\Rotate-App-Credentials.ps1 -SelectionMethod Expiration -AuthMethod Interactive -CredentialType Secret -KeyVaultName 'my-prod-kv' -NotificationType Teams -TeamsWebhookUrl 'https://...'
 
 .EXAMPLE
     # Rotate secrets for tagged apps and store them in a local file (for testing/development)
-    .\Rotate-App-Credentials.ps1 -SelectionMethod Tag -TagName "DevTest" -AuthMethod Interactive -CredentialType Secrets -OutputFile "C:\temp\new_secrets.json"
+    .\Rotate-App-Credentials.ps1 -SelectionMethod Tag -TagName "DevTest" -AuthMethod Interactive -CredentialType Secret -OutputFile "C:\temp\new_secrets.json"
 
 .NOTES
     Author: Pierre-François Guglielmi / Rubrik Speciality Engineering Team
@@ -51,9 +51,9 @@ param(
 
     # Suppressing false positive from PSScriptAnalyzer: This parameter defines a credential TYPE, not a credential itself.
     [System.Diagnostics.CodeAnalysis.SuppressMessageAttribute("PSAvoidUsingPlainTextForPasswords", "CredentialType")]
-    [Parameter(Mandatory=$false, HelpMessage="Type of credential to rotate. Options are Secrets, Certificates or Both")]
-    [ValidateSet('Secrets', 'Certificates', 'Both')]
-    [string]$CredentialType = 'Secrets',
+    [Parameter(Mandatory=$false, HelpMessage="Type of credential to rotate. Options are Secret, Certificate or Both")]
+    [ValidateSet('Secret', 'Certificate', 'Both')]
+    [string]$CredentialType = 'Secret',
 
     [Parameter(Mandatory=$false, HelpMessage="Find credentials expiring in the next N days (used with 'Expiration' method).")]
     [int]$ExpirationDays = 30,
@@ -262,14 +262,14 @@ try {
         $secretsToRotate = @()
         $certsToRotate = @()
 
-        if ($CredentialType -in 'Secrets', 'Both') {
+        if ($CredentialType -in 'Secret', 'Both') {
             $secretsToRotate = if ($SelectionMethod -eq 'Tag') {
                 $app.PasswordCredentials
             } else {
                 $app.PasswordCredentials | Where-Object { $_.EndDateTime -lt $expirationThreshold -and $_.EndDateTime -gt (Get-Date).ToUniversalTime() }
             }
         }
-        if ($CredentialType -in 'Certificates', 'Both') {
+        if ($CredentialType -in 'Certificate', 'Both') {
             $certsToRotate = if ($SelectionMethod -eq 'Tag') {
                 $app.KeyCredentials
             } else {
