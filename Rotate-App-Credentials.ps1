@@ -5,31 +5,31 @@
     This script identifies application credentials for rotation based on expiration or tags. It first verifies that
     the executing principal has the required MS Graph API permissions.
 
-    It supports multiple authentication methods, including interactive user login. For each identified credential, 
-    it generates a new one, securely stores it in Azure Key Vault, and (optionally) removes the old one.
+    It supports multiple authentication methods. For each identified credential, it generates a new one,
+    stores it securely in Azure Key Vault by default, or optionally in a local file for non-production use.
 .PARAMETER SelectionMethod
     Specifies how to identify applications for credential rotation.
-    - 'Expiration': Identifies applications with credentials expiring soon.
+    - 'Expiration': (Default) Identifies applications with credentials expiring soon.
     - 'Tag': Identifies applications by a specific tag. All credentials on tagged apps will be targeted for rotation.
 .PARAMETER TagName
     The tag to search for when using the 'Tag' selection method (e.g., 'Recovered' or 'Restored').
 .PARAMETER AuthMethod
     Specifies the authentication method ('ManagedIdentity', 'ServicePrincipal', or 'Interactive').
 .PARAMETER CredentialType
-    Specifies the type of credential to rotate ('Secret', 'Certificate', or 'Both').
+    Specifies the type of credential to rotate ('Secrets', 'Certificates', or 'Both').
 .PARAMETER NotificationType
     Specifies the notification method ('Teams', 'Email', or 'None').
 .EXAMPLE
-    # Rotate expiring secrets for all apps using interactive user login and notify Teams
-    .\Rotate-App-Credentials.ps1 -SelectionMethod Expiration -AuthMethod Interactive -CredentialType Secret -NotificationType Teams -KeyVaultName 'my-prod-kv' -TeamsWebhookUrl 'https://...'
+    # Rotate expiring secrets for all apps using interactive user login and store them in Key Vault
+    .\Rotate-App-Credentials.ps1 -SelectionMethod Expiration -AuthMethod Interactive -CredentialType Secrets -KeyVaultName 'my-prod-kv' -NotificationType Teams -TeamsWebhookUrl 'https://...'
 
 .EXAMPLE
-    # Force-rotate all certificates on applications tagged with 'CriticalApp' using a Service Principal
-    .\Rotate-App-Credentials.ps1 -SelectionMethod Tag -TagName 'CriticalApp' -AuthMethod ServicePrincipal -TenantId '...' -ClientId '...' -CertificateThumbprint '...' -CredentialType Certificate -NotificationType Email -EmailTo 'admin@contoso.com' -EmailFrom 'noreply@contoso.com' -SmtpServer 'smtp.contoso.com'
+    # Rotate secrets for tagged apps and store them in a local file (for testing/development)
+    .\Rotate-App-Credentials.ps1 -SelectionMethod Tag -TagName "DevTest" -AuthMethod Interactive -CredentialType Secrets -OutputFile "C:\temp\new_secrets.json"
 
 .NOTES
     Author: Pierre-François Guglielmi / Rubrik Speciality Engineering Team
-    Version: 2.4
+    Version: 2.6
     Created: 2025-08-27
     Prerequisites: Microsoft.Graph and Az.KeyVault modules.
 #>
@@ -43,14 +43,17 @@ param(
     [Parameter(Mandatory=$false, HelpMessage="The tag to identify applications when SelectionMethod is 'Tag'.")]
     [string]$TagName,
 
-    [Parameter(Mandatory=$true, HelpMessage="The name of the Azure Key Vault for storing new credentials.")]
+    [Parameter(Mandatory=$false, HelpMessage="The name of the Azure Key Vault for storing new credentials. Required if -OutputFile is not used.")]
     [string]$KeyVaultName,
+    
+    [Parameter(Mandatory=$false, HelpMessage="Path to a local file to store new secrets as JSON. WARNING: This is less secure than Azure Key Vault.")]
+    [string]$OutputFile,
 
     # Suppressing false positive from PSScriptAnalyzer: This parameter defines a credential TYPE, not a credential itself.
     [System.Diagnostics.CodeAnalysis.SuppressMessageAttribute("PSAvoidUsingPlainTextForPasswords", "CredentialType")]
-    [Parameter(Mandatory=$false, HelpMessage="Type of credential to rotate. Options are Secret, Certificate or Both. Default option is Secret")]
-    [ValidateSet('Secret', 'Certificate', 'Both')]
-    [string]$CredentialType = 'Secret',
+    [Parameter(Mandatory=$false, HelpMessage="Type of credential to rotate. Options are Secrets, Certificates or Both")]
+    [ValidateSet('Secrets', 'Certificates', 'Both')]
+    [string]$CredentialType = 'Secrets',
 
     [Parameter(Mandatory=$false, HelpMessage="Find credentials expiring in the next N days (used with 'Expiration' method).")]
     [int]$ExpirationDays = 30,
@@ -112,6 +115,15 @@ param(
 # Validate parameter combinations
 if ($SelectionMethod -eq 'Tag' -and -not $TagName) {
     throw "For 'Tag' selection method, you must provide a -TagName."
+}
+if (-not $KeyVaultName -and -not $OutputFile) {
+    throw "You must specify a destination for new credentials. Use either -KeyVaultName or -OutputFile."
+}
+if ($KeyVaultName -and $OutputFile) {
+    throw "Parameters -KeyVaultName and -OutputFile cannot be used together. Please choose one destination."
+}
+if (($CredentialType -in 'Certificates', 'Both') -and (-not $KeyVaultName)) {
+    throw "Azure Key Vault is required for certificate rotation. Please provide -KeyVaultName when rotating certificates."
 }
 if ($AuthMethod -eq 'ServicePrincipal' -and (-not $TenantId -or -not $ClientId -or -not $CertificateThumbprint)) {
     throw "For 'ServicePrincipal' authentication, you must provide -TenantId, -ClientId, and -CertificateThumbprint."
@@ -250,14 +262,14 @@ try {
         $secretsToRotate = @()
         $certsToRotate = @()
 
-        if ($CredentialType -in 'Secret', 'Both') {
+        if ($CredentialType -in 'Secrets', 'Both') {
             $secretsToRotate = if ($SelectionMethod -eq 'Tag') {
                 $app.PasswordCredentials
             } else {
                 $app.PasswordCredentials | Where-Object { $_.EndDateTime -lt $expirationThreshold -and $_.EndDateTime -gt (Get-Date).ToUniversalTime() }
             }
         }
-        if ($CredentialType -in 'Certificate', 'Both') {
+        if ($CredentialType -in 'Certificates', 'Both') {
             $certsToRotate = if ($SelectionMethod -eq 'Tag') {
                 $app.KeyCredentials
             } else {
@@ -298,9 +310,24 @@ foreach ($app in $appsToProcess) {
             $newSecret = Add-MgApplicationPassword -ApplicationId $app.Id -DisplayName $secretDisplayName
             if (!$newSecret.SecretText) { throw "Generated secret was empty." }
             
-            $secretName = "$($app.DisplayName -replace '[^a-zA-Z0-9-]', '-')-secret"
-            Set-AzKeyVaultSecret -VaultName $KeyVaultName -Name $secretName -SecretValue (ConvertTo-SecureString $newSecret.SecretText -AsPlainText -Force)
-            Write-Log -Message "  -> New secret stored in Key Vault as '$secretName'."
+            # Store the new credential securely
+            if ($PSBoundParameters.ContainsKey('OutputFile')) {
+                Write-Warning "SECURITY RISK: Storing secrets in a plain text file is not recommended for production environments. Ensure this file is properly secured and deleted after use."
+                $secretOutput = [PSCustomObject]@{
+                    ApplicationName = $app.DisplayName
+                    ApplicationId   = $app.Id
+                    SecretKeyId     = $newSecret.KeyId
+                    SecretValue     = $newSecret.SecretText
+                    CreatedDateUTC  = (Get-Date).ToUniversalTime().ToString('o')
+                }
+                $secretOutput | ConvertTo-Json | Add-Content -Path $OutputFile
+                Write-Log -Message "  -> New secret appended to file: $OutputFile."
+            }
+            else {
+                $secretName = "$($app.DisplayName -replace '[^a-zA-Z0-9-]', '-')-secret"
+                Set-AzKeyVaultSecret -VaultName $KeyVaultName -Name $secretName -SecretValue (ConvertTo-SecureString $newSecret.SecretText -AsPlainText -Force)
+                Write-Log -Message "  -> New secret stored in Key Vault as '$secretName'."
+            }
 
             # Then remove the old credentials if enabled
             if ($RemoveOldCredential) {
