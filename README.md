@@ -1,7 +1,7 @@
 # Microsoft Entra ID Application Credential Rotation PowerShell Script
 This repository contains a powerful and flexible PowerShell script to automate the rotation of secrets and certificates for Microsoft Entra ID Applications at scale. It is designed to be run manually by an administrator for targeted operations or fully automated as part of your security and compliance workflow (e.g., in an Azure Automation Account).  
 
-The script securely generates new credentials, stores them in Azure Key Vault for safe retrieval, and provides rich notification options to keep stakeholders informed.
+The script securely generates new credentials, stores them either in Azure Key Vault for safe retrieval or to a local JSON file for convenience (less secure option), and provides rich notification options to keep stakeholders informed.
 
 ## :key: Key Features
 - **Flexible Application Selection**: Identify applications for credential rotation based on:
@@ -12,6 +12,7 @@ The script securely generates new credentials, stores them in Azure Key Vault fo
   - **Service Principal**: For non-interactive, automated scenarios using a dedicated application identity.
   - **Managed Identity**: For secure, passwordless authentication from supported Azure resources like Azure Automation or Azure VMs.
 - **Secure Credential Handling**: New secrets and certificates (with their private keys) are stored directly in **Azure Key Vault**, never exposed in logs or console output.
+  - An alternative option allows storing secrets in a local JSON file for development or testing, with clear security warnings.
 - **Customizable Certificate Generation**: Full control over self-signed certificate creation, including key algorithm, key length, and hash algorithm.
 - **Robust Logging & Notifications**:
   - Detailed local log file for auditing every action.
@@ -35,7 +36,7 @@ The identity used to run the script (User, Service Principal, or Managed Identit
 - `Directory.Read.All`
 - `Application.ReadWrite.All`
 ### 3. Azure Key Vault
-- An existing Azure Key Vault is required.
+- An existing Azure Key Vault is **required if you are rotating certificates or not using the `-OutputFile` option for secrets**.
 - The identity running the script must have an access policy or RBAC role assigned that grants the following permissions:
   - **Secrets**: `Set`
   - **Certificates**: `Import`
@@ -49,7 +50,7 @@ The identity used to run the script (User, Service Principal, or Managed Identit
    
 
 2. **Install PowerShell Modules**
-   Open a PowerShell 7+ terminal and run:  
+   Open a PowerShell 7+ terminal and run:    
    \# Install the Microsoft Graph SDK
    ~~~powershell
    Install-Module Microsoft.Graph -Scope CurrentUser -Force
@@ -60,7 +61,7 @@ The identity used to run the script (User, Service Principal, or Managed Identit
    Install-Module Az.KeyVault -Scope CurrentUser -Force
    ~~~
    
-4. **Configure Permissions for the Automation Principal**
+4. **Configure Permissions for the Automation Principal**  
    Choose one of the authentication methods and configure its permissions.
    - **For Managed Identity / Service Principal**:
      1. Navigate to your Managed Identity or App Registration in the Entra ID portal.
@@ -80,7 +81,7 @@ The identity used to run the script (User, Service Principal, or Managed Identit
 ## :compass: Usage
 The script is run from the command line with parameters to control its behavior.
 
-### Example 1: Interactive Run for Expiring Secrets
+### Example 1: Interactive Run for Expiring Secrets (to Key Vault)
 An administrator can run this command to manually rotate secrets expiring in the next 30 days. The script will prompt for an interactive login.  
 ~~~powershell
 .\Rotate-App-Credentials.ps1 -SelectionMethod Expiration `
@@ -93,7 +94,7 @@ An administrator can run this command to manually rotate secrets expiring in the
 ~~~
 
 ### Example 2: Fully Automated Run with Managed Identity
-This example is ideal for an Azure Automation runbook. It rotates both secrets and certificates, and safely removes the old credentials after a successful rotation.
+This example is ideal for an Azure Automation runbook. It rotates both secrets and certificates, stores them in Key Vault, and safely removes the old credentials after a successful rotation.
 ~~~powershell
 .\Rotate-App-Credentials.ps1 -SelectionMethod Expiration `
     -AuthMethod ManagedIdentity `
@@ -130,29 +131,41 @@ This example demonstrates how to generate a new certificate with a stronger RSA 
     -CertHashAlgorithm SHA512
 ~~~
 
+### Example 5: Storing Secrets to a Local File (Non-Production)
+This command rotates secrets for tagged applications and appends them to a local JSON file.  
+**This method should only be used for testing or in workflows where the output file is immediately secured and deleted.**
+~~~powershell
+.\Rotate-App-Credentials.ps1 -SelectionMethod Tag `
+    -TagName "DevTestApp" `
+    -AuthMethod Interactive `
+    -CredentialType Secrets `
+    -OutputFile "C:\temp\rotated_secrets.json"
+~~~
+
 ## :gear: Parameter Reference
 The following table details all available parameters for the script.
-| Parameter                  | Type    | Description                                                                       | Required? | Default Value        |
-|----------------------------|---------|-----------------------------------------------------------------------------------|-----------|----------------------|
-| `-SelectionMethod`         | String  | How to identify apps. `Expiration` or `Tag`.                                      | Yes       |                      |
-| `-TagName`                 | String  | The tag to search for if `SelectionMethod` is Tag.                                | No        |                      |
-| `-KeyVaultName`            | String  | The name of the Azure Key Vault to store                                          | Yes       |                      |
-| `-CredentialType`          | String  | Type of credential to rotate. `Secret`, `Certificate`, or `Both`.                 | No        | Secret               |
-| `-ExpirationDays`          | Int     | The number of days to look ahead for expiring credentials.                        | No        | 30                   |
-| `-RemoveOldCredential`     | Boolean | If `$true`, the old credential will be deleted after rotation.                    | No        | $false               |
-| `-AuthMethod`              | String  | Authentication method. `ManagedIdentity`, `ServicePrincipal`, or `Interactive`.   | Yes       |                      |
-| `-TenantId`                | String  | Tenant ID, required for `ServicePrincipal` and `Interactive` authentication.      | No        |                      |
-| `-ClientId`                | String  | Client ID, required for `ServicePrincipal` authentication.                        | No        |                      |
-| `-CertificateThumbprint`   | String  | Certificate thumbprint, required for `ServicePrincipal` authentication.           | No        |                      |
-| `-CertKeyAlgorithm`        | String  | Key algorithm for new certificates. `RSA` or `ECDSA`.                             | No        | RSA                  |
-| `-CertKeyLength`           | Int     | Key length for new RSA certificates. `2048`, `3072`, or `4096`.                   | No        | 2048                 |
-| `-CertHashAlgorithm`       | String  | Hash algorithm for new certificates. `SHA256`, `SHA384`, `SHA512`.                | No        | SHA256               |
-| `-CertStoreLocation`       | String  | Local path for temporary certificate creation.                                    | No        | Cert:\CurrentUser\My |
-| `-NotificationType`        | String  | Notification channel. `Teams`, `Email`, or `None`.                                | No        |                      |
-| `-TeamsWebhookUrl`         | String  | Webhook URL for Teams notifications.                                              | No        |                      |
-| `-EmailTo`                 | String  | Recipient email address.                                                          | No        |                      |
-| `-EmailFrom`               | String  | Sender email address.                                                             | No        |                      |
-| `-SmtpServer`              | String  | SMTP server for email.                                                            | No        |                      |
+| Parameter                 | Type    | Description                                                                                   | Required? | Default Value        |
+|---------------------------|---------|-----------------------------------------------------------------------------------------------|-----------|----------------------|
+| `SelectionMethod`         | String  | How to identify apps. `Expiration` or `Tag`.                                                  | Yes       |                      |
+| `TagName`                 | String  | The tag to search for if `SelectionMethod` is `Tag`.                                          | No        |                      |
+| `KeyVaultName`            | String  | Name of the Azure Key Vault. Required if `-OutputFile` is not used or for cert rotation.      | Yes       |                      |
+| `OutputFile`              | String  | Path to a local file to store new secrets as JSON. **WARNING**: Less secure than Key Vault.   | Yes       |                      |
+| `CredentialType`          | String  | Type of credential to rotate. `Secret`, `Certificate`, or `Both`.                             | No        | Secret               |
+| `ExpirationDays`          | Int     | The number of days to look ahead for expiring credentials.                                    | No        | 30                   |
+| `RemoveOldCredential`     | Boolean | If `$true`, the old credential will be deleted after rotation.                                | No        | $false               |
+| `AuthMethod`              | String  | Authentication method. `ManagedIdentity`, `ServicePrincipal`, or `Interactive`.               | Yes       |                      |
+| `TenantId`                | String  | Tenant ID, required for `ServicePrincipal` and `Interactive` authentication.                  | No        |                      |
+| `ClientId`                | String  | Client ID, required for `ServicePrincipal` authentication.                                    | No        |                      |
+| `CertificateThumbprint`   | String  | Certificate thumbprint, required for `ServicePrincipal` authentication.                       | No        |                      |
+| `CertKeyAlgorithm`        | String  | Key algorithm for new certificates. `RSA` or `ECDSA`.                                         | No        | RSA                  |
+| `CertKeyLength`           | Int     | Key length for new RSA certificates. `2048`, `3072`, or `4096`.                               | No        | 2048                 |
+| `CertHashAlgorithm`       | String  | Hash algorithm for new certificates. `SHA256`, `SHA384`, `SHA512`.                            | No        | SHA256               |
+| `CertStoreLocation`       | String  | Local path for temporary certificate creation.                                                | No        | Cert:\CurrentUser\My |
+| `NotificationType`        | String  | Notification channel. `Teams`, `Email`, or `None`.                                            | No        |                      |
+| `TeamsWebhookUrl`         | String  | Webhook URL for Teams notifications.                                                          | No        |                      |
+| `EmailTo`                 | String  | Recipient email address.                                                                      | No        |                      |
+| `EmailFrom`               | String  | Sender email address.                                                                         | No        |                      |
+| `SmtpServer`              | String  | SMTP server for email.                                                                        | No        |                      |
 
 ## :muscle: Contributing
 Contributions are welcome! Please feel free to open an issue or submit a pull request.
