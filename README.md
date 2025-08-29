@@ -107,10 +107,10 @@ This example is ideal for an Azure Automation runbook. It rotates both secrets a
 ~~~
 
 ### Example 3: Forced Rotation for Tagged Applications
-This command forces an immediate rotation of certificates for all applications that have been tagged with CriticalApp-RotateNow. It uses a Service Principal for authentication.
+This command forces an immediate rotation of certificates for all applications that have been tagged with `RestoredApp`. It uses a Service Principal for authentication.
 ~~~powershell
 .\Rotate-App-Credentials.ps1 -SelectionMethod Tag `
-    -TagName "CriticalApp-RotateNow" `
+    -TagName "RestoredApp" `
     -AuthMethod ServicePrincipal `
     -TenantId "your-tenant-id.onmicrosoft.com" `
     -ClientId "spn-client-id" `
@@ -119,7 +119,8 @@ This command forces an immediate rotation of certificates for all applications t
     -KeyVaultName "your-key-vault-name"
 ~~~
 
-### Example 4: Custom Certificate GenerationThis example demonstrates how to generate a new certificate with a stronger RSA key and SHA512 hashing algorithm.
+### Example 4: Custom Certificate Generation
+This example demonstrates how to generate a new certificate with a stronger RSA key and SHA512 hashing algorithm.
 ~~~powershell
 .\Rotate-App-Credentials.ps1 -SelectionMethod Expiration `
     -AuthMethod Interactive `
@@ -131,27 +132,27 @@ This command forces an immediate rotation of certificates for all applications t
 
 ## :gear: Parameter Reference
 The following table details all available parameters for the script.
-| Parameter             | Type    | Description                                                                 | Required? | Default Value        |
-|-----------------------|---------|-----------------------------------------------------------------------------|-----------|----------------------|
-| SelectionMethod       | String  | How to identify apps. Expiration or Tag.                                    | Yes       |                      |
-| TagName               | String  | The tag to search for if SelectionMethod is Tag.                            | No        |                      |
-| KeyVaultName          | String  | The name of the Azure Key Vault to store                                    | Yes       |                      |
-| CredentialType        | String  | Type of credential to rotate. Secret, Certificate, or Both.                 | No        | Secret               |
-| ExpirationDays        | Int     | The number of days to look ahead for expiring credentials.                  | No        | 30                   |
-| RemoveOldCredential   | Boolean | If $true, the old credential will be deleted after rotation.                | No        | $false               |
-| AuthMethod            | String  | Authentication method. ManagedIdentity, ServicePrincipal, or Interactive.   | Yes       |                      |
-| TenantId              | String  | Tenant ID, required for ServicePrincipal and Interactive auth.              | No        |                      |
-| ClientId              | String  | Client ID, required for ServicePrincipal auth.                              | No        |                      |
-| CertificateThumbprint | String  | Cert thumbprint, required for ServicePrincipal auth.                        | No        |                      |
-| CertKeyAlgorithm      | String  | Key algorithm for new certs. RSA or ECDSA.                                  | No        | RSA                  |
-| CertKeyLength         | Int     | Key length for new RSA certs. 2048, 3072, or 4096.                          | No        | 2048                 |
-| CertHashAlgorithm     | String  | Hash algorithm for new certificates. SHA256, SHA384, SHA512.                | No        | SHA256               |
-| CertStoreLocation     | String  | Local path for temporary cert creation.                                     | No        | Cert:\CurrentUser\My |
-| NotificationType      | String  | Notification channel. Teams, Email, or None.                                | No        |                      |
-| TeamsWebhookUrl       | String  | Webhook URL for Teams notifications.                                        | No        |                      |
-| EmailTo               | String  | Recipient email address.                                                    | No        |                      |
-| EmailFrom             | String  | Sender email address.                                                       | No        |                      |
-| SmtpServer            | String  | SMTP server for email.                                                      | No        |                      |
+| Parameter                  | Type    | Description                                                                       | Required? | Default Value        |
+|----------------------------|---------|-----------------------------------------------------------------------------------|-----------|----------------------|
+| `-SelectionMethod`         | String  | How to identify apps. `Expiration` or `Tag`.                                      | Yes       |                      |
+| `-TagName`                 | String  | The tag to search for if `SelectionMethod` is Tag.                                | No        |                      |
+| `-KeyVaultName`            | String  | The name of the Azure Key Vault to store                                          | Yes       |                      |
+| `-CredentialType`          | String  | Type of credential to rotate. `Secret`, `Certificate`, or `Both`.                 | No        | Secret               |
+| `-ExpirationDays`          | Int     | The number of days to look ahead for expiring credentials.                        | No        | 30                   |
+| `-RemoveOldCredential`     | Boolean | If `$true`, the old credential will be deleted after rotation.                    | No        | $false               |
+| `-AuthMethod`              | String  | Authentication method. `ManagedIdentity`, `ServicePrincipal`, or `Interactive`.   | Yes       |                      |
+| `-TenantId`                | String  | Tenant ID, required for `ServicePrincipal` and `Interactive` authentication.      | No        |                      |
+| `-ClientId`                | String  | Client ID, required for `ServicePrincipal` authentication.                        | No        |                      |
+| `-CertificateThumbprint`   | String  | Certificate thumbprint, required for `ServicePrincipal` authentication.           | No        |                      |
+| `-CertKeyAlgorithm`        | String  | Key algorithm for new certificates. `RSA` or `ECDSA`.                             | No        | RSA                  |
+| `-CertKeyLength`           | Int     | Key length for new RSA certificates. `2048`, `3072`, or `4096`.                   | No        | 2048                 |
+| `-CertHashAlgorithm`       | String  | Hash algorithm for new certificates. `SHA256`, `SHA384`, `SHA512`.                | No        | SHA256               |
+| `-CertStoreLocation`       | String  | Local path for temporary certificate creation.                                    | No        | Cert:\CurrentUser\My |
+| `-NotificationType`        | String  | Notification channel. `Teams`, `Email`, or `None`.                                | No        |                      |
+| `-TeamsWebhookUrl`         | String  | Webhook URL for Teams notifications.                                              | No        |                      |
+| `-EmailTo`                 | String  | Recipient email address.                                                          | No        |                      |
+| `-EmailFrom`               | String  | Sender email address.                                                             | No        |                      |
+| `-SmtpServer`              | String  | SMTP server for email.                                                            | No        |                      |
 
 ## :muscle: Contributing
 Contributions are welcome! Please feel free to open an issue or submit a pull request.
