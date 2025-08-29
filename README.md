@@ -162,4 +162,4 @@ Contributions are welcome! Please feel free to open an issue or submit a pull re
 5. Open a Pull Request.
 
 ## License 
-This project is licensed under the Apache 2.0 License. See the LICENSE file for details.
+This project is licensed under the [MIT License](https://github.com/pfguglielmi/Rotate-App-Credentials/tree/main?tab=MIT-1-ov-file). See the LICENSE file for details.
