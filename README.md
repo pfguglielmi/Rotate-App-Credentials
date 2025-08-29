@@ -3,7 +3,7 @@ This repository contains a powerful and flexible PowerShell script to automate t
 
 The script securely generates new credentials, stores them in Azure Key Vault for safe retrieval, and provides rich notification options to keep stakeholders informed.
 
-## Key Features
+## :key: Key Features
 - **Flexible Application Selection**: Identify applications for credential rotation based on:
   - **Expiration**: Target credentials expiring within a configurable number of days.
   - **Tagging**: Force an immediate rotation for any application with a specific tag.
@@ -18,7 +18,7 @@ The script securely generates new credentials, stores them in Azure Key Vault fo
   - Real-time notifications sent to **Microsoft Teams** or via **Email**.
 - **Permission Verification**: Pre-flight check ensures the executing principal has the required Microsoft Graph API permissions before making any changes.
 
-## Requirements
+## :clipboard: Requirements
 ### 1. PowerShell Environment
 - **PowerShell 7.2 or later** is recommended.
 - Required PowerShell Modules:
@@ -40,7 +40,7 @@ The identity used to run the script (User, Service Principal, or Managed Identit
   - **Secrets**: `Set`
   - **Certificates**: `Import`
 
-## Installation and Setup
+## :hammer: Installation and Setup
 1. **Download the PowsherShell script file** or **Clone the Repository** (Optional)   
    ~~~
    git clone [https://github.com/pfguglielmi/Rotate-App-Credentials.git](https://github.com/pfguglielmi/Rotate-App-Credentials.git)`
@@ -77,7 +77,7 @@ The identity used to run the script (User, Service Principal, or Managed Identit
      - **For Teams**: Create an [Incoming Webhook](https://docs.microsoft.com/en-us/microsoftteams/platform/webhooks-and-connectors/how-to/add-incoming-webhook) for your desired channel and copy the URL.
      - **For Email**: Ensure you have access to an SMTP server that the script can use to send emails.
 
-## Usage
+## :compass: Usage
 The script is run from the command line with parameters to control its behavior.
 
 ### Example 1: Interactive Run for Expiring Secrets
@@ -129,7 +129,7 @@ This command forces an immediate rotation of certificates for all applications t
     -CertHashAlgorithm SHA512
 ~~~
 
-## Parameter Reference
+## :gear: Parameter Reference
 The following table details all available parameters for the script.
 | Parameter             | Type    | Description                                                                 | Required? | Default Value        |
 |-----------------------|---------|-----------------------------------------------------------------------------|-----------|----------------------|
@@ -153,7 +153,7 @@ The following table details all available parameters for the script.
 | EmailFrom             | String  | Sender email address.                                                       | No        |                      |
 | SmtpServer            | String  | SMTP server for email.                                                      | No        |                      |
 
-## Contributing
+## :muscle: Contributing
 Contributions are welcome! Please feel free to open an issue or submit a pull request.
 1. Fork the repository.
 2. Create your feature branch (`git checkout -b feature/AmazingFeature`).
@@ -161,5 +161,5 @@ Contributions are welcome! Please feel free to open an issue or submit a pull re
 4. Push to the branch (`git push origin feature/AmazingFeature`).
 5. Open a Pull Request.
 
-## License 
+## :pushpin: License 
 This project is licensed under the [MIT License](https://github.com/pfguglielmi/Rotate-App-Credentials/tree/main?tab=MIT-1-ov-file). See the LICENSE file for details.
