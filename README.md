@@ -171,6 +171,7 @@ The following table details all available parameters for the script.
 | `InputFile`               | String  | Path to a CSV file with `ObjectId` and/or `AppId` columns. Required for File selection.       | No        |                      |
 | `KeyVaultName`            | String  | Name of the Azure Key Vault. Required if `-OutputFile` is not used or for cert rotation.      | **Yes**   |                      |
 | `OutputFile`              | String  | Path to a local file to store new secrets as JSON. **WARNING**: Less secure than Key Vault.   | **Yes**   |                      |
+| `LogDirectory`            | String  | The local directory to store the log file.                                                    | No        | C:\temp\logs         |
 | `CredentialType`          | String  | Type of credential to rotate. `Secret`, `Certificate`, or `Both`.                             | No        | Secret               |
 | `ExpirationDays`          | Int     | The number of days to look ahead for expiring credentials.                                    | No        | 30                   |
 | `RemoveOldCredential`     | Boolean | If `$true`, the old credential will be deleted after rotation.                                | No        | $false               |
