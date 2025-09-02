@@ -28,12 +28,12 @@
     .\Rotate-App-Credentials.ps1 -SelectionMethod Expiration -AuthMethod Interactive -CredentialType Secret -KeyVaultName 'my-prod-kv' -NotificationType Teams -TeamsWebhookUrl 'https://...'
 
 .EXAMPLE
-    # Rotate all credentials for applications listed in a CSV file using ObjectId
-    .\Rotate-App-Credentials.ps1 -SelectionMethod File -InputFile "C:\temp\apps-to-rotate.csv" -AuthMethod Interactive -CredentialType Both -KeyVaultName 'my-prod-kv'
+    # Rotate all credentials for applications listed in a CSV file and specify a custom log directory
+    .\Rotate-App-Credentials.ps1 -SelectionMethod File -InputFile "C:\temp\apps-to-rotate.csv" -AuthMethod Interactive -CredentialType Both -KeyVaultName 'my-prod-kv' -LogDirectory "C:\AuditLogs\EntraRotation"
 
 .NOTES
     Author: Pierre-François Guglielmi / Rubrik Speciality Engineering Team
-    Version: 2.8
+    Version: 2.9
     Created: 2025-08-27
     Prerequisites: Microsoft.Graph and Az.KeyVault modules.
 #>
@@ -55,6 +55,9 @@ param(
     
     [Parameter(Mandatory=$false, HelpMessage="Path to a local file to store new secrets as JSON. WARNING: This is less secure than Azure Key Vault.")]
     [string]$OutputFile,
+
+    [Parameter(Mandatory=$false, HelpMessage="Directory to store the log file. Default is C:\temp\logs")]
+    [string]$LogDirectory = "C:\temp\logs",
 
     # Suppressing false positive from PSScriptAnalyzer: This parameter defines a credential TYPE, not a credential itself.
     [System.Diagnostics.CodeAnalysis.SuppressMessageAttribute("PSAvoidUsingPlainTextForPasswords", "CredentialType")]
@@ -147,8 +150,7 @@ if ($NotificationType -eq 'Email' -and (-not $EmailTo -or -not $EmailFrom -or -n
 }
 
 # --- Static Configuration ---
-$logDirectory = "C:\temp\logs" # Local path to store log files.
-$logFile = Join-Path $logDirectory "EntraAppCredentialRotation-$(Get-Date -Format 'yyyyMMdd-HHmmss').log"
+$logFile = Join-Path $LogDirectory "EntraAppCredentialRotation-$(Get-Date -Format 'yyyyMMdd-HHmmss').log"
 $secretDisplayName = "AutoRotated-Secret-$(Get-Date -Format 'yyyy-MM-dd')"
 
 #================================================================================
@@ -223,7 +225,7 @@ function Test-MgGraphPermissions {
 #================================================================================
 
 # --- Initialize ---
-if (-not (Test-Path $logDirectory)) { New-Item -Path $logDirectory -ItemType Directory | Out-Null }
+if (-not (Test-Path $LogDirectory)) { New-Item -Path $LogDirectory -ItemType Directory | Out-Null }
 $successes = [System.Collections.ArrayList]@()
 $failures = [System.Collections.ArrayList]@()
 
