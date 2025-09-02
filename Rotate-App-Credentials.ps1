@@ -68,7 +68,7 @@ param(
     [Parameter(Mandatory=$false, HelpMessage="Find credentials expiring in the next N days (used with 'Expiration' method).")]
     [int]$ExpirationDays = 30,
 
-    [Parameter(Mandatory=$false, HelpMessage="If $true, the script will delete the old credential.")]
+    [Parameter(Mandatory=$false, HelpMessage="If true, the script will delete the old credential.")]
     [bool]$RemoveOldCredential = $false,
 
     # --- Authentication Parameters ---
@@ -267,7 +267,7 @@ try {
         }
         'File' {
             Write-Log -Message "Identifying applications from input file: '$InputFile'"
-            $inputFileData = Import-Csv -Path $InputFile
+            $inputFileData = Import-Csv -Path $InputFile -Delimiter ',' | Select-Object ObjectId, AppId
             foreach ($row in $inputFileData) {
                 $app = $null
                 $objectId = $row.ObjectId
