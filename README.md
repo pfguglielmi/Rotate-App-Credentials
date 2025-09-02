@@ -168,7 +168,7 @@ The following table details all available parameters for the script.
 |---------------------------|---------|-----------------------------------------------------------------------------------------------|-----------|----------------------|
 | `SelectionMethod`         | String  | How to identify apps. `Expiration` or `Tag`.                                                  | **Yes**   |                      |
 | `TagName`                 | String  | The tag to search for if `SelectionMethod` is `Tag`.                                          | No        |                      |
-| `InputFile`               | String  | Path to a CSV file with ObjectId and/or AppId columns. Required for File selection.           | No        |                      |
+| `InputFile`               | String  | Path to a CSV file with `ObjectId` and/or `AppId` columns. Required for File selection.       | No        |                      |
 | `KeyVaultName`            | String  | Name of the Azure Key Vault. Required if `-OutputFile` is not used or for cert rotation.      | **Yes**   |                      |
 | `OutputFile`              | String  | Path to a local file to store new secrets as JSON. **WARNING**: Less secure than Key Vault.   | **Yes**   |                      |
 | `CredentialType`          | String  | Type of credential to rotate. `Secret`, `Certificate`, or `Both`.                             | No        | Secret               |
