@@ -2,17 +2,21 @@
 .SYNOPSIS
     Automates the rotation of Microsoft Entra ID Application secrets and/or certificates.
 .DESCRIPTION
-    This script identifies application credentials for rotation based on expiration or tags. It first verifies that
-    the executing principal has the required MS Graph API permissions.
+    This script identifies application credentials for rotation based on expiration, tags, or a provided input file.
+    It first verifies that the executing principal has the required MS Graph API permissions.
 
     It supports multiple authentication methods. For each identified credential, it generates a new one,
     stores it securely in Azure Key Vault by default, or optionally in a local file for non-production use.
 .PARAMETER SelectionMethod
     Specifies how to identify applications for credential rotation.
-    - 'Expiration': (Default) Identifies applications with credentials expiring soon.
+    - 'Expiration': Identifies applications with credentials expiring soon.
     - 'Tag': Identifies applications by a specific tag. All credentials on tagged apps will be targeted for rotation.
+    - 'File': Identifies applications from a list provided in a CSV input file.
 .PARAMETER TagName
     The tag to search for when using the 'Tag' selection method (e.g., 'Recovered' or 'Restored').
+.PARAMETER InputFile
+    The path to a CSV file containing application IDs to process. Required when SelectionMethod is 'File'.
+    The CSV must contain a header with 'ObjectId' and/or 'AppId' columns. 'ObjectId' is prioritized.
 .PARAMETER AuthMethod
     Specifies the authentication method ('ManagedIdentity', 'ServicePrincipal', or 'Interactive').
 .PARAMETER CredentialType
@@ -24,30 +28,36 @@
     .\Rotate-App-Credentials.ps1 -SelectionMethod Expiration -AuthMethod Interactive -CredentialType Secret -KeyVaultName 'my-prod-kv' -NotificationType Teams -TeamsWebhookUrl 'https://...'
 
 .EXAMPLE
-    # Rotate secrets for tagged apps and store them in a local file (for testing/development)
-    .\Rotate-App-Credentials.ps1 -SelectionMethod Tag -TagName "DevTest" -AuthMethod Interactive -CredentialType Secret -OutputFile "C:\temp\new_secrets.json"
+    # Rotate all credentials for applications listed in a CSV file and specify a custom log directory
+    .\Rotate-App-Credentials.ps1 -SelectionMethod File -InputFile "C:\temp\apps-to-rotate.csv" -AuthMethod Interactive -CredentialType Both -KeyVaultName 'my-prod-kv' -LogDirectory "C:\AuditLogs\EntraRotation"
 
 .NOTES
     Author: Pierre-François Guglielmi / Rubrik Speciality Engineering Team
-    Version: 2.6
+    Version: 2.9
     Created: 2025-08-27
     Prerequisites: Microsoft.Graph and Az.KeyVault modules.
 #>
 [CmdletBinding()]
 param(
     # --- Core Logic Parameters ---
-    [Parameter(Mandatory=$true, HelpMessage="Method to identify applications for rotation. Options are Expiration or Tag")]
-    [ValidateSet('Expiration', 'Tag')]
+    [Parameter(Mandatory=$true, HelpMessage="Method to identify applications for rotation. Options are Expiration, Tag, or File")]
+    [ValidateSet('Expiration', 'Tag', 'File')]
     [string]$SelectionMethod,
 
     [Parameter(Mandatory=$false, HelpMessage="The tag to identify applications when SelectionMethod is 'Tag'.")]
     [string]$TagName,
+
+    [Parameter(Mandatory=$false, HelpMessage="Path to a CSV file with an 'AppId' and/or 'ObjectId' column. Required for 'File' selection method.")]
+    [string]$InputFile,
 
     [Parameter(Mandatory=$false, HelpMessage="The name of the Azure Key Vault for storing new credentials. Required if -OutputFile is not used.")]
     [string]$KeyVaultName,
     
     [Parameter(Mandatory=$false, HelpMessage="Path to a local file to store new secrets as JSON. WARNING: This is less secure than Azure Key Vault.")]
     [string]$OutputFile,
+
+    [Parameter(Mandatory=$false, HelpMessage="Directory to store the log file. Default is C:\temp\logs")]
+    [string]$LogDirectory = "C:\temp\logs",
 
     # Suppressing false positive from PSScriptAnalyzer: This parameter defines a credential TYPE, not a credential itself.
     [System.Diagnostics.CodeAnalysis.SuppressMessageAttribute("PSAvoidUsingPlainTextForPasswords", "CredentialType")]
@@ -116,13 +126,17 @@ param(
 if ($SelectionMethod -eq 'Tag' -and -not $TagName) {
     throw "For 'Tag' selection method, you must provide a -TagName."
 }
+if ($SelectionMethod -eq 'File') {
+    if (-not $InputFile) { throw "For 'File' selection method, you must provide an -InputFile." }
+    if (-not (Test-Path $InputFile)) { throw "Input file not found at path: $InputFile" }
+}
 if (-not $KeyVaultName -and -not $OutputFile) {
     throw "You must specify a destination for new credentials. Use either -KeyVaultName or -OutputFile."
 }
 if ($KeyVaultName -and $OutputFile) {
     throw "Parameters -KeyVaultName and -OutputFile cannot be used together. Please choose one destination."
 }
-if (($CredentialType -in 'Certificates', 'Both') -and (-not $KeyVaultName)) {
+if (($CredentialType -in 'Certificate', 'Both') -and (-not $KeyVaultName)) {
     throw "Azure Key Vault is required for certificate rotation. Please provide -KeyVaultName when rotating certificates."
 }
 if ($AuthMethod -eq 'ServicePrincipal' -and (-not $TenantId -or -not $ClientId -or -not $CertificateThumbprint)) {
@@ -136,8 +150,7 @@ if ($NotificationType -eq 'Email' -and (-not $EmailTo -or -not $EmailFrom -or -n
 }
 
 # --- Static Configuration ---
-$logDirectory = "C:\temp\logs" # Local path to store log files.
-$logFile = Join-Path $logDirectory "EntraAppCredentialRotation-$(Get-Date -Format 'yyyyMMdd-HHmmss').log"
+$logFile = Join-Path $LogDirectory "EntraAppCredentialRotation-$(Get-Date -Format 'yyyyMMdd-HHmmss').log"
 $secretDisplayName = "AutoRotated-Secret-$(Get-Date -Format 'yyyy-MM-dd')"
 
 #================================================================================
@@ -212,7 +225,7 @@ function Test-MgGraphPermissions {
 #================================================================================
 
 # --- Initialize ---
-if (-not (Test-Path $logDirectory)) { New-Item -Path $logDirectory -ItemType Directory | Out-Null }
+if (-not (Test-Path $LogDirectory)) { New-Item -Path $LogDirectory -ItemType Directory | Out-Null }
 $successes = [System.Collections.ArrayList]@()
 $failures = [System.Collections.ArrayList]@()
 
@@ -306,16 +319,16 @@ try {
         $certsToRotate = @()
 
         if ($CredentialType -in 'Secret', 'Both') {
-            $secretsToRotate = if ($SelectionMethod -eq 'Tag') {
+            $secretsToRotate = if ($SelectionMethod -in 'Tag', 'File') {
                 $app.PasswordCredentials
-            } else {
+            } else { # Expiration
                 $app.PasswordCredentials | Where-Object { $_.EndDateTime -lt $expirationThreshold -and $_.EndDateTime -gt (Get-Date).ToUniversalTime() }
             }
         }
         if ($CredentialType -in 'Certificate', 'Both') {
-            $certsToRotate = if ($SelectionMethod -eq 'Tag') {
+            $certsToRotate = if ($SelectionMethod -in 'Tag', 'File') {
                 $app.KeyCredentials
-            } else {
+            } else { # Expiration
                 $app.KeyCredentials | Where-Object { $_.EndDateTime -lt $expirationThreshold -and $_.EndDateTime -gt (Get-Date).ToUniversalTime() }
             }
         }

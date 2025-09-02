@@ -7,6 +7,7 @@ The script securely generates new credentials, stores them either in Azure Key V
 - **Flexible Application Selection**: Identify applications for credential rotation based on:
   - **Expiration**: Target credentials expiring within a configurable number of days.
   - **Tagging**: Force an immediate rotation for any application with a specific tag.
+  - **Input File**: Target a specific list of applications provided in a CSV file.
 - **Multiple Authentication Methods**: Run the script using various identities:
   - **Interactive**: For attended execution by a user or administrator with an interactive sign-in prompt.
   - **Service Principal**: For non-interactive, automated scenarios using a dedicated application identity.
@@ -142,18 +143,39 @@ This command rotates secrets for tagged applications and appends them to a local
     -OutputFile "C:\temp\rotated_secrets.json"
 ~~~
 
+### Example 6: Rotating Credentials from a CSV File
+This command rotates all secrets and certificates for the applications listed in the specified CSV file. The script will prioritize the `ObjectId` if both `ObjectId` and `AppId` are present for a given application.
+
+**Sample apps-to-rotate.csv**:
+~~~
+AppName,ObjectId,AppId
+My Critical App,xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx,aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa
+Another App,,bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb
+~~~
+
+**PowerShell Command**:
+~~~powershell
+.\Rotate-App-Credentials.ps1 -SelectionMethod File `
+    -InputFile "C:\temp\apps-to-rotate.csv" `
+    -AuthMethod Interactive `
+    -CredentialType Both `
+    -KeyVaultName "your-key-vault-name"
+~~~
+
 ## :gear: Parameter Reference
 The following table details all available parameters for the script.
 | Parameter                 | Type    | Description                                                                                   | Required? | Default Value        |
 |---------------------------|---------|-----------------------------------------------------------------------------------------------|-----------|----------------------|
-| `SelectionMethod`         | String  | How to identify apps. `Expiration` or `Tag`.                                                  | Yes       |                      |
+| `SelectionMethod`         | String  | How to identify apps. `Expiration` or `Tag`.                                                  | **Yes**   |                      |
 | `TagName`                 | String  | The tag to search for if `SelectionMethod` is `Tag`.                                          | No        |                      |
-| `KeyVaultName`            | String  | Name of the Azure Key Vault. Required if `-OutputFile` is not used or for cert rotation.      | Yes       |                      |
-| `OutputFile`              | String  | Path to a local file to store new secrets as JSON. **WARNING**: Less secure than Key Vault.   | Yes       |                      |
+| `InputFile`               | String  | Path to a CSV file with `ObjectId` and/or `AppId` columns. Required for File selection.       | No        |                      |
+| `KeyVaultName`            | String  | Name of the Azure Key Vault. Required if `-OutputFile` is not used or for cert rotation.      | **Yes**   |                      |
+| `OutputFile`              | String  | Path to a local file to store new secrets as JSON. **WARNING**: Less secure than Key Vault.   | **Yes**   |                      |
+| `LogDirectory`            | String  | The local directory to store the log file.                                                    | No        | C:\temp\logs         |
 | `CredentialType`          | String  | Type of credential to rotate. `Secret`, `Certificate`, or `Both`.                             | No        | Secret               |
 | `ExpirationDays`          | Int     | The number of days to look ahead for expiring credentials.                                    | No        | 30                   |
 | `RemoveOldCredential`     | Boolean | If `$true`, the old credential will be deleted after rotation.                                | No        | $false               |
-| `AuthMethod`              | String  | Authentication method. `ManagedIdentity`, `ServicePrincipal`, or `Interactive`.               | Yes       |                      |
+| `AuthMethod`              | String  | Authentication method. `ManagedIdentity`, `ServicePrincipal`, or `Interactive`.               | **Yes**   |                      |
 | `TenantId`                | String  | Tenant ID, required for `ServicePrincipal` and `Interactive` authentication.                  | No        |                      |
 | `ClientId`                | String  | Client ID, required for `ServicePrincipal` authentication.                                    | No        |                      |
 | `CertificateThumbprint`   | String  | Certificate thumbprint, required for `ServicePrincipal` authentication.                       | No        |                      |
