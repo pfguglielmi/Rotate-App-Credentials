@@ -267,7 +267,7 @@ try {
         }
         'File' {
             Write-Log -Message "Identifying applications from input file: '$InputFile'"
-            $inputFileData = Import-Csv -Path $InputFile -Delimiter ',' | Select-Object ObjectId, AppId
+            $inputFileData = Import-Csv -Path $InputFile -Delimiter ';' | Select-Object ObjectId, AppId
             foreach ($row in $inputFileData) {
                 $app = $null
                 $objectId = $row.ObjectId
