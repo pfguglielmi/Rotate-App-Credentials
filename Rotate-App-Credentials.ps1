@@ -13,7 +13,7 @@
     - 'Tag': Identifies applications by a specific tag. All credentials on tagged apps will be targeted for rotation.
     - 'File': Identifies applications from a list provided in a CSV input file.
 .PARAMETER TagName
-    The tag to search for when using the 'Tag' selection method.
+    The tag to search for when using the 'Tag' selection method (e.g., 'Recovered' or 'Restored').
 .PARAMETER InputFile
     The path to a CSV file containing application IDs to process. Required when SelectionMethod is 'File'.
     The CSV must contain a header with 'ObjectId' and/or 'AppId' columns. 'ObjectId' is prioritized.
