@@ -139,7 +139,7 @@ This command rotates secrets for tagged applications and appends them to a local
 .\Rotate-App-Credentials.ps1 -SelectionMethod Tag `
     -TagName "DevTestApp" `
     -AuthMethod Interactive `
-    -CredentialType Secrets `
+    -CredentialType Secret `
     -OutputFile "C:\temp\rotated_secrets.json"
 ~~~
 
