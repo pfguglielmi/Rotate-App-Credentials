@@ -58,7 +58,7 @@ param(
     [Parameter(Mandatory=$false, HelpMessage="Find credentials expiring in the next N days (used with 'Expiration' method).")]
     [int]$ExpirationDays = 30,
 
-    [Parameter(Mandatory=$false, HelpMessage="If $true, the script will delete the old credential.")]
+    [Parameter(Mandatory=$false, HelpMessage="If true, the script will delete the old credential.")]
     [bool]$RemoveOldCredential = $false,
 
     # --- Authentication Parameters ---
@@ -246,13 +246,56 @@ try {
     $properties = @('id', 'displayName', 'passwordCredentials', 'keyCredentials', 'tags')
     $applicationsToScan = @()
 
-    if ($SelectionMethod -eq 'Tag') {
-        Write-Log -Message "Identifying applications with tag: '$TagName'"
-        $filter = "tags/any(t: t eq '$TagName')"
-        $applicationsToScan = Get-MgApplication -Filter $filter -All -Property $properties
-    } else { # Expiration
-        Write-Log -Message "Identifying applications with credentials expiring in $ExpirationDays days."
-        $applicationsToScan = Get-MgApplication -All -Property $properties
+    switch ($SelectionMethod) {
+        'Tag' {
+            Write-Log -Message "Identifying applications with tag: '$TagName'"
+            $filter = "tags/any(t: t eq '$TagName')"
+            $applicationsToScan = Get-MgApplication -Filter $filter -All -Property $properties
+        }
+        'File' {
+            Write-Log -Message "Identifying applications from input file: '$InputFile'"
+            $inputFileData = Import-Csv -Path $InputFile -Delimiter ',' | Select-Object ObjectId, AppId
+            foreach ($row in $inputFileData) {
+                $app = $null
+                $objectId = $row.ObjectId
+                $appId = $row.AppId
+
+                try {
+                    if ($objectId) {
+                        Write-Log -Message "Looking up application by ObjectId: $objectId"
+                        $app = Get-MgApplication -ApplicationId $objectId -Property $properties -ErrorAction Stop
+                    }
+                    elseif ($appId) {
+                        Write-Log -Message "Looking up application by AppId: $appId"
+                        $filter = "appId eq '$appId'"
+                        $foundApps = Get-MgApplication -Filter $filter -Property $properties -ErrorAction Stop
+                        if ($foundApps.Count -eq 1) {
+                            $app = $foundApps
+                        } elseif ($foundApps.Count -gt 1) {
+                            Write-Log -Message "Found multiple applications with AppId '$appId'. This should not happen. Skipping." -Level "WARN"
+                        }
+                    }
+                    else {
+                        Write-Log -Message "Row in CSV is missing a valid 'ObjectId' or 'AppId' column. Skipping." -Level "WARN"
+                        continue
+                    }
+
+                    if ($app) {
+                        $applicationsToScan += $app
+                    } else {
+                        $idUsed = if ($objectId) { "ObjectId $objectId" } else { "AppId $appId" }
+                        Write-Log -Message "Could not find application with $idUsed from input file. Skipping." -Level "WARN"
+                    }
+                } catch {
+                    $idUsed = if ($objectId) { "ObjectId $objectId" } else { "AppId $appId" }
+                    Write-Log -Message "An error occurred while trying to find application with $idUsed. Error: $($_.Exception.Message). Skipping." -Level "ERROR"
+                }
+            }
+        }
+        Default { # Expiration
+            Write-Log -Message "Identifying applications with credentials expiring in $ExpirationDays days."
+            $applicationsToScan = Get-MgApplication -All -Property $properties
+        }
     }
 
     $appsToProcess = @()
