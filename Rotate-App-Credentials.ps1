@@ -71,7 +71,7 @@ param(
     [Parameter(Mandatory=$false, HelpMessage="If specified, the script will generate a new credential for an app that has none.")]
     [switch]$GenerateNewIfMissing,
 
-    [Parameter(Mandatory=$false, HelpMessage="If $true, the script will delete the old credential.")]
+    [Parameter(Mandatory=$false, HelpMessage="If true, the script will delete the old credential.")]
     [bool]$RemoveOldCredential = $false,
 
     # --- Authentication Parameters ---
