@@ -164,7 +164,7 @@ Another App,,bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb
 ~~~
 
 ### Example 7: Generate Credentials for Recovered Apps
-This command targets applications tagged with RecoveredApp, which may have no existing credentials. The -GenerateNewIfMissing switch ensures that a new secret is created for them.
+This command targets applications tagged with RecoveredApp, which may have no existing credentials. The `-GenerateNewIfMissing` switch ensures that a new secret is created for them.
 ~~~powershell
 .\Rotate-App-Credentials.ps1 -SelectionMethod Tag `
     -TagName "RecoveredApp" `
