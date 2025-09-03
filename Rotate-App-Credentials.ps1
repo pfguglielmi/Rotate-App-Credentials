@@ -13,6 +13,11 @@
     - 'Expiration': Identifies applications with credentials expiring soon.
     - 'Tag': Identifies applications by a specific tag.
     - 'File': Identifies applications from a list provided in a CSV input file.
+.PARAMETER TagName
+    The tag to search for when using the 'Tag' selection method (e.g., 'Recovered' or 'Restored').
+.PARAMETER InputFile
+    The path to a CSV file containing application IDs to process. Required when SelectionMethod is 'File'.
+    The CSV must contain a header with 'ObjectId' and/or 'AppId' columns. 'ObjectId' is prioritized.
 .PARAMETER GenerateNewIfMissing
     If specified, the script will generate a new credential for any targeted application that currently has none.
     This is useful for provisioning credentials for applications restored from a backup.
@@ -20,6 +25,8 @@
     Specifies the authentication method ('ManagedIdentity', 'ServicePrincipal', or 'Interactive').
 .PARAMETER CredentialType
     Specifies the type of credential to rotate/generate ('Secret', 'Certificate', or 'Both').
+.PARAMETER NotificationType
+    Specifies the notification method ('Teams', 'Email', or 'None').
 .EXAMPLE
     # Generate a new secret for applications tagged as 'RecoveredApp' which may have no credentials
     .\Rotate-App-Credentials.ps1 -SelectionMethod Tag -TagName "RecoveredApp" -AuthMethod Interactive -CredentialType Secret -KeyVaultName 'my-prod-kv' -GenerateNewIfMissing
