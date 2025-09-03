@@ -1,8 +1,9 @@
 <#
 .SYNOPSIS
-    Automates the rotation of Microsoft Entra ID Application secrets and/or certificates.
+    Automates the rotation and generation of Microsoft Entra ID Application secrets and/or certificates.
 .DESCRIPTION
     This script identifies application credentials for rotation based on expiration, tags, or a provided input file.
+    It can also generate initial credentials for applications that have none (e.g., after a backup recovery).
     It first verifies that the executing principal has the required MS Graph API permissions.
 
     It supports multiple authentication methods. For each identified credential, it generates a new one,
@@ -10,30 +11,22 @@
 .PARAMETER SelectionMethod
     Specifies how to identify applications for credential rotation.
     - 'Expiration': Identifies applications with credentials expiring soon.
-    - 'Tag': Identifies applications by a specific tag. All credentials on tagged apps will be targeted for rotation.
+    - 'Tag': Identifies applications by a specific tag.
     - 'File': Identifies applications from a list provided in a CSV input file.
-.PARAMETER TagName
-    The tag to search for when using the 'Tag' selection method (e.g., 'Recovered' or 'Restored').
-.PARAMETER InputFile
-    The path to a CSV file containing application IDs to process. Required when SelectionMethod is 'File'.
-    The CSV must contain a header with 'ObjectId' and/or 'AppId' columns. 'ObjectId' is prioritized.
+.PARAMETER GenerateNewIfMissing
+    If specified, the script will generate a new credential for any targeted application that currently has none.
+    This is useful for provisioning credentials for applications restored from a backup.
 .PARAMETER AuthMethod
     Specifies the authentication method ('ManagedIdentity', 'ServicePrincipal', or 'Interactive').
 .PARAMETER CredentialType
-    Specifies the type of credential to rotate ('Secret', 'Certificate', or 'Both').
-.PARAMETER NotificationType
-    Specifies the notification method ('Teams', 'Email', or 'None').
+    Specifies the type of credential to rotate/generate ('Secret', 'Certificate', or 'Both').
 .EXAMPLE
-    # Rotate expiring secrets for all apps using interactive user login and store them in Key Vault
-    .\Rotate-App-Credentials.ps1 -SelectionMethod Expiration -AuthMethod Interactive -CredentialType Secret -KeyVaultName 'my-prod-kv' -NotificationType Teams -TeamsWebhookUrl 'https://...'
-
-.EXAMPLE
-    # Rotate all credentials for applications listed in a CSV file and specify a custom log directory
-    .\Rotate-App-Credentials.ps1 -SelectionMethod File -InputFile "C:\temp\apps-to-rotate.csv" -AuthMethod Interactive -CredentialType Both -KeyVaultName 'my-prod-kv' -LogDirectory "C:\AuditLogs\EntraRotation"
+    # Generate a new secret for applications tagged as 'RecoveredApp' which may have no credentials
+    .\Rotate-App-Credentials.ps1 -SelectionMethod Tag -TagName "RecoveredApp" -AuthMethod Interactive -CredentialType Secret -KeyVaultName 'my-prod-kv' -GenerateNewIfMissing
 
 .NOTES
     Author: Pierre-François Guglielmi / Rubrik Speciality Engineering Team
-    Version: 2.9
+    Version: 3.0
     Created: 2025-08-27
     Prerequisites: Microsoft.Graph and Az.KeyVault modules.
 #>
@@ -68,7 +61,10 @@ param(
     [Parameter(Mandatory=$false, HelpMessage="Find credentials expiring in the next N days (used with 'Expiration' method).")]
     [int]$ExpirationDays = 30,
 
-    [Parameter(Mandatory=$false, HelpMessage="If true, the script will delete the old credential.")]
+    [Parameter(Mandatory=$false, HelpMessage="If specified, the script will generate a new credential for an app that has none.")]
+    [switch]$GenerateNewIfMissing,
+
+    [Parameter(Mandatory=$false, HelpMessage="If $true, the script will delete the old credential.")]
     [bool]$RemoveOldCredential = $false,
 
     # --- Authentication Parameters ---
@@ -137,7 +133,7 @@ if ($KeyVaultName -and $OutputFile) {
     throw "Parameters -KeyVaultName and -OutputFile cannot be used together. Please choose one destination."
 }
 if (($CredentialType -in 'Certificate', 'Both') -and (-not $KeyVaultName)) {
-    throw "Azure Key Vault is required for certificate rotation. Please provide -KeyVaultName when rotating certificates."
+    throw "Azure Key Vault is required for certificate rotation/generation. Please provide -KeyVaultName when processing certificates."
 }
 if ($AuthMethod -eq 'ServicePrincipal' -and (-not $TenantId -or -not $ClientId -or -not $CertificateThumbprint)) {
     throw "For 'ServicePrincipal' authentication, you must provide -TenantId, -ClientId, and -CertificateThumbprint."
@@ -233,6 +229,7 @@ Write-Log -Message "Starting Entra ID Application Credential Rotation Script."
 Write-Log -Message "Selection Method: $SelectionMethod"
 Write-Log -Message "Authentication Method: $AuthMethod"
 Write-Log -Message "Credential Type: $CredentialType"
+if ($GenerateNewIfMissing) { Write-Log -Message "Generate New If Missing: Enabled" -Level "WARN" }
 
 # --- Connect to Microsoft Graph and Verify Permissions ---
 try {
@@ -267,7 +264,7 @@ try {
         }
         'File' {
             Write-Log -Message "Identifying applications from input file: '$InputFile'"
-            $inputFileData = Import-Csv -Path $InputFile -Delimiter ';' | Select-Object ObjectId, AppId
+            $inputFileData = Import-Csv -Path $InputFile
             foreach ($row in $inputFileData) {
                 $app = $null
                 $objectId = $row.ObjectId
@@ -333,10 +330,15 @@ try {
             }
         }
         
-        if ($secretsToRotate.Count -gt 0 -or $certsToRotate.Count -gt 0) {
-            Write-Log -Message "Found credentials to rotate for '$($app.DisplayName)'" -Level "WARN"
+        $hasCredentialsToRotate = ($secretsToRotate.Count -gt 0 -or $certsToRotate.Count -gt 0)
+        # We only consider generating new creds if the selection method is explicit (Tag or File)
+        $isCandidateForGeneration = $GenerateNewIfMissing -and ($SelectionMethod -in 'Tag', 'File')
+
+        if ($hasCredentialsToRotate -or $isCandidateForGeneration) {
+            Write-Log -Message "Queuing application '$($app.DisplayName)' for processing." -Level "INFO"
             $appsToProcess += [PSCustomObject]@{
-                Id = $app.Id; DisplayName = $app.DisplayName
+                Id = $app.Id; DisplayName = $app.DisplayName;
+                PasswordCredentials = $app.PasswordCredentials; KeyCredentials = $app.KeyCredentials;
                 SecretsToRotate = $secretsToRotate; CertsToRotate = $certsToRotate
             }
         }
@@ -358,9 +360,26 @@ Write-Log -Message "Found $($appsToProcess.Count) applications with credentials 
 foreach ($app in $appsToProcess) {
     Write-Log -Message "Processing application: '$($app.DisplayName)' (App ID: $($app.Id))"
     
-    # --- Rotate Secrets ---
-    if ($app.SecretsToRotate.Count -gt 0) {
-        Write-Log -Message "  -> Rotating client secrets..."
+    # Determine if we should process a secret for this app
+    $processSecret = $false
+    if ($CredentialType -in 'Secret', 'Both') {
+        if (($app.SecretsToRotate.Count -gt 0) -or ($GenerateNewIfMissing -and $app.PasswordCredentials.Count -eq 0)) {
+            $processSecret = $true
+        }
+    }
+
+    # Determine if we should process a certificate for this app
+    $processCert = $false
+    if ($CredentialType -in 'Certificate', 'Both') {
+        if (($app.CertsToRotate.Count -gt 0) -or ($GenerateNewIfMissing -and $app.KeyCredentials.Count -eq 0)) {
+            $processCert = $true
+        }
+    }
+
+    # --- Rotate/Generate Secrets ---
+    if ($processSecret) {
+        $action = if ($app.PasswordCredentials.Count -eq 0) { "Generating" } else { "Rotating" }
+        Write-Log -Message "  -> $action client secret..."
         try {
             # Add a new secret first to ensure zero downtime
             $newSecret = Add-MgApplicationPassword -ApplicationId $app.Id -DisplayName $secretDisplayName
@@ -386,22 +405,23 @@ foreach ($app in $appsToProcess) {
             }
 
             # Then remove the old credentials if enabled
-            if ($RemoveOldCredential) {
+            if ($RemoveOldCredential -and $app.SecretsToRotate.Count -gt 0) {
                 $app.SecretsToRotate | ForEach-Object {
                     Write-Log -Message "  -> Removing old secret (Key ID: $($_.KeyId))" -Level "WARN"
                     Remove-MgApplicationPassword -ApplicationId $app.Id -KeyId $_.KeyId
                 }
             }
-            [void]$successes.Add("Rotated Secret for $($app.DisplayName)")
+            [void]$successes.Add("Processed Secret for $($app.DisplayName)")
         } catch {
-            $errorMessage = "Failed to rotate secret for '$($app.DisplayName)'. Error: $($_.Exception.Message)"
+            $errorMessage = "Failed to process secret for '$($app.DisplayName)'. Error: $($_.Exception.Message)"
             Write-Log -Message $errorMessage -Level "ERROR"; [void]$failures.Add($errorMessage)
         }
     }
 
-    # --- Rotate Certificates ---
-    if ($app.CertsToRotate.Count -gt 0) {
-        Write-Log -Message "  -> Rotating certificates..."
+    # --- Rotate/Generate Certificates ---
+    if ($processCert) {
+        $action = if ($app.KeyCredentials.Count -eq 0) { "Generating" } else { "Rotating" }
+        Write-Log -Message "  -> $action certificate..."
         try {
             # Generate and add a new certificate using specified parameters
             $certParams = @{
@@ -426,15 +446,15 @@ foreach ($app in $appsToProcess) {
             Remove-Item -Path $cert.PSPath # Clean up local cert store
 
             # Then remove the old credentials if enabled
-            if ($RemoveOldCredential) {
+            if ($RemoveOldCredential -and $app.CertsToRotate.Count -gt 0) {
                 $app.CertsToRotate | ForEach-Object {
                     Write-Log -Message "  -> Removing old certificate (Key ID: $($_.KeyId))" -Level "WARN"
                     Remove-MgApplicationKey -ApplicationId $app.Id -KeyId $_.KeyId
                 }
             }
-            [void]$successes.Add("Rotated Certificate for $($app.DisplayName)")
+            [void]$successes.Add("Processed Certificate for $($app.DisplayName)")
         } catch {
-            $errorMessage = "Failed to rotate certificate for '$($app.DisplayName)'. Error: $($_.Exception.Message)"
+            $errorMessage = "Failed to process certificate for '$($app.DisplayName)'. Error: $($_.Exception.Message)"
             Write-Log -Message $errorMessage -Level "ERROR"; [void]$failures.Add($errorMessage)
         }
     }
