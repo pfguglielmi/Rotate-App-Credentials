@@ -13,11 +13,6 @@
     - 'Expiration': Identifies applications with credentials expiring soon.
     - 'Tag': Identifies applications by a specific tag.
     - 'File': Identifies applications from a list provided in a CSV input file.
-.PARAMETER TagName
-    The tag to search for when using the 'Tag' selection method (e.g., 'Recovered' or 'Restored').
-.PARAMETER InputFile
-    The path to a CSV file containing application IDs to process. Required when SelectionMethod is 'File'.
-    The CSV must contain a header with 'ObjectId' and/or 'AppId' columns. 'ObjectId' is prioritized.
 .PARAMETER GenerateNewIfMissing
     If specified, the script will generate a new credential for any targeted application that currently has none.
     This is useful for provisioning credentials for applications restored from a backup.
@@ -25,15 +20,13 @@
     Specifies the authentication method ('ManagedIdentity', 'ServicePrincipal', or 'Interactive').
 .PARAMETER CredentialType
     Specifies the type of credential to rotate/generate ('Secret', 'Certificate', or 'Both').
-.PARAMETER NotificationType
-    Specifies the notification method ('Teams', 'Email', or 'None').
 .EXAMPLE
     # Generate a new secret for applications tagged as 'RecoveredApp' which may have no credentials
     .\Rotate-App-Credentials.ps1 -SelectionMethod Tag -TagName "RecoveredApp" -AuthMethod Interactive -CredentialType Secret -KeyVaultName 'my-prod-kv' -GenerateNewIfMissing
 
 .NOTES
     Author: Pierre-François Guglielmi / Rubrik Speciality Engineering Team
-    Version: 3.0
+    Version: 3.1
     Created: 2025-08-27
     Prerequisites: Microsoft.Graph and Az.KeyVault modules.
 #>
@@ -71,7 +64,7 @@ param(
     [Parameter(Mandatory=$false, HelpMessage="If specified, the script will generate a new credential for an app that has none.")]
     [switch]$GenerateNewIfMissing,
 
-    [Parameter(Mandatory=$false, HelpMessage="If true, the script will delete the old credential.")]
+    [Parameter(Mandatory=$false, HelpMessage="If $true, the script will delete the old credential.")]
     [bool]$RemoveOldCredential = $false,
 
     # --- Authentication Parameters ---
@@ -236,7 +229,7 @@ Write-Log -Message "Starting Entra ID Application Credential Rotation Script."
 Write-Log -Message "Selection Method: $SelectionMethod"
 Write-Log -Message "Authentication Method: $AuthMethod"
 Write-Log -Message "Credential Type: $CredentialType"
-if ($GenerateNewIfMissing) { Write-Log -Message "Generate New If Missing: Enabled" -Level "WARN" }
+if ($GenerateNewIfMissing.IsPresent) { Write-Log -Message "Generate New If Missing: Enabled" -Level "WARN" }
 
 # --- Connect to Microsoft Graph and Verify Permissions ---
 try {
@@ -271,7 +264,7 @@ try {
         }
         'File' {
             Write-Log -Message "Identifying applications from input file: '$InputFile'"
-            $inputFileData = Import-Csv -Path $InputFile -Delimiter ';' | Select-Object ObjectId, AppId
+            $inputFileData = Import-Csv -Path $InputFile
             foreach ($row in $inputFileData) {
                 $app = $null
                 $objectId = $row.ObjectId
@@ -339,7 +332,7 @@ try {
         
         $hasCredentialsToRotate = ($secretsToRotate.Count -gt 0 -or $certsToRotate.Count -gt 0)
         # We only consider generating new creds if the selection method is explicit (Tag or File)
-        $isCandidateForGeneration = $GenerateNewIfMissing -and ($SelectionMethod -in 'Tag', 'File')
+        $isCandidateForGeneration = ($GenerateNewIfMissing.IsPresent) -and ($SelectionMethod -in 'Tag', 'File')
 
         if ($hasCredentialsToRotate -or $isCandidateForGeneration) {
             Write-Log -Message "Queuing application '$($app.DisplayName)' for processing." -Level "INFO"
@@ -370,7 +363,7 @@ foreach ($app in $appsToProcess) {
     # Determine if we should process a secret for this app
     $processSecret = $false
     if ($CredentialType -in 'Secret', 'Both') {
-        if (($app.SecretsToRotate.Count -gt 0) -or ($GenerateNewIfMissing -and $app.PasswordCredentials.Count -eq 0)) {
+        if (($app.SecretsToRotate.Count -gt 0) -or ($GenerateNewIfMissing.IsPresent -and $app.PasswordCredentials.Count -eq 0)) {
             $processSecret = $true
         }
     }
@@ -378,7 +371,7 @@ foreach ($app in $appsToProcess) {
     # Determine if we should process a certificate for this app
     $processCert = $false
     if ($CredentialType -in 'Certificate', 'Both') {
-        if (($app.CertsToRotate.Count -gt 0) -or ($GenerateNewIfMissing -and $app.KeyCredentials.Count -eq 0)) {
+        if (($app.CertsToRotate.Count -gt 0) -or ($GenerateNewIfMissing.IsPresent -and $app.KeyCredentials.Count -eq 0)) {
             $processCert = $true
         }
     }
@@ -450,7 +443,7 @@ foreach ($app in $appsToProcess) {
             $certName = "$($app.DisplayName -replace '[^a-zA-Z0-9-]', '-')-cert"
             $kvCert = Import-AzureKeyVaultCertificate -VaultName $KeyVaultName -Name $certName -FilePath $cert.PSPath
             Write-Log -Message "  -> New certificate with private key stored in Key Vault as '$($kvCert.Name)'."
-            Remove-Item -Path $cert.PSPath # Clean up local cert store
+            Remove-Item -Path $cert.Path # Clean up local cert store
 
             # Then remove the old credentials if enabled
             if ($RemoveOldCredential -and $app.CertsToRotate.Count -gt 0) {
