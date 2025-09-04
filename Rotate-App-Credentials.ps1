@@ -33,7 +33,7 @@
 
 .NOTES
     Author: Pierre-François Guglielmi / Rubrik Speciality Engineering Team
-    Version: 3.0
+    Version: 3.1
     Created: 2025-08-27
     Prerequisites: Microsoft.Graph and Az.KeyVault modules.
 #>
@@ -236,7 +236,7 @@ Write-Log -Message "Starting Entra ID Application Credential Rotation Script."
 Write-Log -Message "Selection Method: $SelectionMethod"
 Write-Log -Message "Authentication Method: $AuthMethod"
 Write-Log -Message "Credential Type: $CredentialType"
-if ($GenerateNewIfMissing) { Write-Log -Message "Generate New If Missing: Enabled" -Level "WARN" }
+if ($GenerateNewIfMissing.IsPresent) { Write-Log -Message "Generate New If Missing: Enabled" -Level "WARN" }
 
 # --- Connect to Microsoft Graph and Verify Permissions ---
 try {
@@ -339,7 +339,7 @@ try {
         
         $hasCredentialsToRotate = ($secretsToRotate.Count -gt 0 -or $certsToRotate.Count -gt 0)
         # We only consider generating new creds if the selection method is explicit (Tag or File)
-        $isCandidateForGeneration = $GenerateNewIfMissing -and ($SelectionMethod -in 'Tag', 'File')
+        $isCandidateForGeneration = ($GenerateNewIfMissing.IsPresent) -and ($SelectionMethod -in 'Tag', 'File')
 
         if ($hasCredentialsToRotate -or $isCandidateForGeneration) {
             Write-Log -Message "Queuing application '$($app.DisplayName)' for processing." -Level "INFO"
@@ -370,7 +370,7 @@ foreach ($app in $appsToProcess) {
     # Determine if we should process a secret for this app
     $processSecret = $false
     if ($CredentialType -in 'Secret', 'Both') {
-        if (($app.SecretsToRotate.Count -gt 0) -or ($GenerateNewIfMissing -and $app.PasswordCredentials.Count -eq 0)) {
+        if (($app.SecretsToRotate.Count -gt 0) -or ($GenerateNewIfMissing.IsPresent -and $app.PasswordCredentials.Count -eq 0)) {
             $processSecret = $true
         }
     }
@@ -378,7 +378,7 @@ foreach ($app in $appsToProcess) {
     # Determine if we should process a certificate for this app
     $processCert = $false
     if ($CredentialType -in 'Certificate', 'Both') {
-        if (($app.CertsToRotate.Count -gt 0) -or ($GenerateNewIfMissing -and $app.KeyCredentials.Count -eq 0)) {
+        if (($app.CertsToRotate.Count -gt 0) -or ($GenerateNewIfMissing.IsPresent -and $app.KeyCredentials.Count -eq 0)) {
             $processCert = $true
         }
     }
@@ -450,7 +450,7 @@ foreach ($app in $appsToProcess) {
             $certName = "$($app.DisplayName -replace '[^a-zA-Z0-9-]', '-')-cert"
             $kvCert = Import-AzureKeyVaultCertificate -VaultName $KeyVaultName -Name $certName -FilePath $cert.PSPath
             Write-Log -Message "  -> New certificate with private key stored in Key Vault as '$($kvCert.Name)'."
-            Remove-Item -Path $cert.PSPath # Clean up local cert store
+            Remove-Item -Path $cert.Path # Clean up local cert store
 
             # Then remove the old credentials if enabled
             if ($RemoveOldCredential -and $app.CertsToRotate.Count -gt 0) {
