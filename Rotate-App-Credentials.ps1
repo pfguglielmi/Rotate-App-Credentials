@@ -33,7 +33,7 @@
 
 .NOTES
     Author: Pierre-François Guglielmi / Rubrik Speciality Engineering Team
-    Version: 3.1
+    Version: 3.2
     Created: 2025-08-27
     Prerequisites: Microsoft.Graph and Az.KeyVault modules.
 #>
@@ -67,6 +67,9 @@ param(
 
     [Parameter(Mandatory=$false, HelpMessage="Find credentials expiring in the next N days (used with 'Expiration' method).")]
     [int]$ExpirationDays = 30,
+
+    [Parameter(Mandatory=$false, HelpMessage="Specifies the expiration for new secrets in months. Default is 6.")]
+    [int]$SecretExpInMonths = 6,
 
     [Parameter(Mandatory=$false, HelpMessage="If specified, the script will generate a new credential for an app that has none.")]
     [switch]$GenerateNewIfMissing,
@@ -388,8 +391,12 @@ foreach ($app in $appsToProcess) {
         $action = if ($app.PasswordCredentials.Count -eq 0) { "Generating" } else { "Rotating" }
         Write-Log -Message "  -> $action client secret..."
         try {
-            # Add a new secret first to ensure zero downtime
-            $newSecret = Add-MgApplicationPassword -ApplicationId $app.Id -DisplayName $secretDisplayName
+            # Create the password credential object with an expiration date
+            $passwordCredential = @{
+                DisplayName = $secretDisplayName
+                EndDateTime = (Get-Date).AddMonths($SecretExpInMonths)
+            }
+            $newSecret = Add-MgApplicationPassword -ApplicationId $app.Id -PasswordCredential $passwordCredential
             if (!$newSecret.SecretText) { throw "Generated secret was empty." }
             
             # Store the new credential securely
@@ -450,7 +457,7 @@ foreach ($app in $appsToProcess) {
             $certName = "$($app.DisplayName -replace '[^a-zA-Z0-9-]', '-')-cert"
             $kvCert = Import-AzureKeyVaultCertificate -VaultName $KeyVaultName -Name $certName -FilePath $cert.PSPath
             Write-Log -Message "  -> New certificate with private key stored in Key Vault as '$($kvCert.Name)'."
-            Remove-Item -Path $cert.Path # Clean up local cert store
+            Remove-Item -Path $cert.PSPath # Clean up local cert store
 
             # Then remove the old credentials if enabled
             if ($RemoveOldCredential -and $app.CertsToRotate.Count -gt 0) {
