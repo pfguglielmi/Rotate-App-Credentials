@@ -8,6 +8,7 @@ The script securely generates new credentials, stores them either in Azure Key V
   - **Expiration**: Target credentials expiring within a configurable number of days.
   - **Tagging**: Force an immediate rotation for any application with a specific tag.
   - **Input File**: Target a specific list of applications provided in a CSV file.
+- **Provisioning for Recovered Apps**: Generate initial secrets or certificates for applications that have none, perfect for post-recovery scenarios.
 - **Multiple Authentication Methods**: Run the script using various identities:
   - **Interactive**: For attended execution by a user or administrator with an interactive sign-in prompt.
   - **Service Principal**: For non-interactive, automated scenarios using a dedicated application identity.
@@ -139,7 +140,7 @@ This command rotates secrets for tagged applications and appends them to a local
 .\Rotate-App-Credentials.ps1 -SelectionMethod Tag `
     -TagName "DevTestApp" `
     -AuthMethod Interactive `
-    -CredentialType Secrets `
+    -CredentialType Secret `
     -OutputFile "C:\temp\rotated_secrets.json"
 ~~~
 
@@ -162,6 +163,28 @@ Another App,,bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb
     -KeyVaultName "your-key-vault-name"
 ~~~
 
+### Example 7: Generate Credentials for Recovered Apps
+This command targets applications tagged with RecoveredApp, which may have no existing credentials. The `-GenerateNewIfMissing` switch ensures that a new secret is created for them.
+~~~powershell
+.\Rotate-App-Credentials.ps1 -SelectionMethod Tag `
+    -TagName "RecoveredApp" `
+    -AuthMethod Interactive `
+    -CredentialType Secret `
+    -KeyVaultName "your-key-vault-name" `
+    -GenerateNewIfMissing
+~~~
+
+### Example 8: Creating a Secret with a Custom Lifetime
+This command generates a new secret for a tagged application that will only be valid for 12 months, instead of the default 6.
+~~~powershell
+.\Rotate-App-Credentials.ps1 -SelectionMethod Tag `
+    -TagName "ShortLivedCreds" `
+    -AuthMethod Interactive `
+    -CredentialType Secret `
+    -KeyVaultName "your-key-vault-name" `
+    -SecretExpInMonths 12
+~~~
+
 ## :gear: Parameter Reference
 The following table details all available parameters for the script.
 | Parameter                 | Type    | Description                                                                                   | Required? | Default Value        |
@@ -174,6 +197,8 @@ The following table details all available parameters for the script.
 | `LogDirectory`            | String  | The local directory to store the log file.                                                    | No        | C:\temp\logs         |
 | `CredentialType`          | String  | Type of credential to rotate. `Secret`, `Certificate`, or `Both`.                             | No        | Secret               |
 | `ExpirationDays`          | Int     | The number of days to look ahead for expiring credentials.                                    | No        | 30                   |
+| `SecretExpInMonths`       | Int     | The validity period for new secrets, in months.                                               | No        | 6                   |
+| `GenerateNewIfMissing`    | Switch  | If specified, generates a new credential for a targeted app that has none.                    | No        | $false               |
 | `RemoveOldCredential`     | Boolean | If `$true`, the old credential will be deleted after rotation.                                | No        | $false               |
 | `AuthMethod`              | String  | Authentication method. `ManagedIdentity`, `ServicePrincipal`, or `Interactive`.               | **Yes**   |                      |
 | `TenantId`                | String  | Tenant ID, required for `ServicePrincipal` and `Interactive` authentication.                  | No        |                      |
@@ -183,7 +208,7 @@ The following table details all available parameters for the script.
 | `CertKeyLength`           | Int     | Key length for new RSA certificates. `2048`, `3072`, or `4096`.                               | No        | 2048                 |
 | `CertHashAlgorithm`       | String  | Hash algorithm for new certificates. `SHA256`, `SHA384`, `SHA512`.                            | No        | SHA256               |
 | `CertStoreLocation`       | String  | Local path for temporary certificate creation.                                                | No        | Cert:\CurrentUser\My |
-| `NotificationType`        | String  | Notification channel. `Teams`, `Email`, or `None`.                                            | No        |                      |
+| `NotificationType`        | String  | Notification channel. `Teams`, `Email`, or `None`.                                            | No        | None                 |
 | `TeamsWebhookUrl`         | String  | Webhook URL for Teams notifications.                                                          | No        |                      |
 | `EmailTo`                 | String  | Recipient email address.                                                                      | No        |                      |
 | `EmailFrom`               | String  | Sender email address.                                                                         | No        |                      |
