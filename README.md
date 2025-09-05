@@ -175,14 +175,14 @@ This command targets applications tagged with RecoveredApp, which may have no ex
 ~~~
 
 ### Example 8: Creating a Secret with a Custom Lifetime
-This command generates a new secret for a tagged application that will only be valid for 6 months.
+This command generates a new secret for a tagged application that will only be valid for 12 months, instead of the default 6.
 ~~~powershell
 .\Rotate-App-Credentials.ps1 -SelectionMethod Tag `
     -TagName "ShortLivedCreds" `
     -AuthMethod Interactive `
     -CredentialType Secret `
     -KeyVaultName "your-key-vault-name" `
-    -SecretExpInMonths 6
+    -SecretExpInMonths 12
 ~~~
 
 ## :gear: Parameter Reference
