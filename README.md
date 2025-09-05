@@ -174,6 +174,17 @@ This command targets applications tagged with RecoveredApp, which may have no ex
     -GenerateNewIfMissing
 ~~~
 
+### Example 8: Creating a Secret with a Custom Lifetime
+This command generates a new secret for a tagged application that will only be valid for 12 months, instead of the default 6.
+~~~powershell
+.\Rotate-App-Credentials.ps1 -SelectionMethod Tag `
+    -TagName "ShortLivedCreds" `
+    -AuthMethod Interactive `
+    -CredentialType Secret `
+    -KeyVaultName "your-key-vault-name" `
+    -SecretExpInMonths 12
+~~~
+
 ## :gear: Parameter Reference
 The following table details all available parameters for the script.
 | Parameter                 | Type    | Description                                                                                   | Required? | Default Value        |
@@ -186,6 +197,7 @@ The following table details all available parameters for the script.
 | `LogDirectory`            | String  | The local directory to store the log file.                                                    | No        | C:\temp\logs         |
 | `CredentialType`          | String  | Type of credential to rotate. `Secret`, `Certificate`, or `Both`.                             | No        | Secret               |
 | `ExpirationDays`          | Int     | The number of days to look ahead for expiring credentials.                                    | No        | 30                   |
+| `SecretExpInMonths`       | Int     | The validity period for new secrets, in months.                                               | No        | 6                   |
 | `GenerateNewIfMissing`    | Switch  | If specified, generates a new credential for a targeted app that has none.                    | No        | $false               |
 | `RemoveOldCredential`     | Boolean | If `$true`, the old credential will be deleted after rotation.                                | No        | $false               |
 | `AuthMethod`              | String  | Authentication method. `ManagedIdentity`, `ServicePrincipal`, or `Interactive`.               | **Yes**   |                      |
