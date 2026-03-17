@@ -368,7 +368,7 @@ Write-Log -Message "Found $($appsToProcess.Count) applications with credentials 
 
 # --- Main Processing Loop ---
 foreach ($app in $appsToProcess) {
-    Write-Log -Message "Processing application: '$($app.DisplayName)' (App ID: $($app.Id))"
+    Write-Log -Message "Processing application: '$($app.DisplayName)' (Object ID: $($app.Id))"
     
     # Determine if we should process a secret for this app
     $processSecret = $false
@@ -404,7 +404,7 @@ foreach ($app in $appsToProcess) {
                 Write-Warning "SECURITY RISK: Storing secrets in a plain text file is not recommended for production environments. Ensure this file is properly secured and deleted after use."
                 $secretOutput = [PSCustomObject]@{
                     ApplicationName = $app.DisplayName
-                    ApplicationId   = $app.Id
+                    ObjectId        = $app.Id
                     SecretKeyId     = $newSecret.KeyId
                     SecretValue     = $newSecret.SecretText
                     CreatedDateUTC  = (Get-Date).ToUniversalTime().ToString('o')
