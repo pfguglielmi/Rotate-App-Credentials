@@ -1,1 +1,4 @@
 .vscode/launch.json
+./launch.json
+./EntraAppCredentialRotation*.log
+./new-secrets.json

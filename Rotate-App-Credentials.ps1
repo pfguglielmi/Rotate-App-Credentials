@@ -13,11 +13,14 @@
     - 'Expiration': Identifies applications with credentials expiring soon.
     - 'Tag': Identifies applications by a specific tag.
     - 'File': Identifies applications from a list provided in a CSV input file.
+    - 'Object': Identifies applications from provided Application object(s).
 .PARAMETER TagName
     The tag to search for when using the 'Tag' selection method (e.g., 'Recovered' or 'Restored').
 .PARAMETER InputFile
     The path to a CSV file containing application IDs to process. Required when SelectionMethod is 'File'.
     The CSV must contain a header with 'ObjectId' and/or 'AppId' columns. 'ObjectId' is prioritized.
+.PARAMETER InputObject
+    Application object(s) to process. Required when SelectionMethod is 'Object'. Accepts one or an array of objects.
 .PARAMETER GenerateNewIfMissing
     If specified, the script will generate a new credential for any targeted application that currently has none.
     This is useful for provisioning credentials for applications restored from a backup.
@@ -40,8 +43,8 @@
 [CmdletBinding()]
 param(
     # --- Core Logic Parameters ---
-    [Parameter(Mandatory=$true, HelpMessage="Method to identify applications for rotation. Options are Expiration, Tag, or File")]
-    [ValidateSet('Expiration', 'Tag', 'File')]
+    [Parameter(Mandatory=$true, HelpMessage="Method to identify applications for rotation. Options are Expiration, Tag, File, or Object")]
+    [ValidateSet('Expiration', 'Tag', 'File', 'Object')]
     [string]$SelectionMethod,
 
     [Parameter(Mandatory=$false, HelpMessage="The tag to identify applications when SelectionMethod is 'Tag'.")]
@@ -49,6 +52,9 @@ param(
 
     [Parameter(Mandatory=$false, HelpMessage="Path to a CSV file with an 'AppId' and/or 'ObjectId' column. Required for 'File' selection method.")]
     [string]$InputFile,
+
+    [Parameter(Mandatory=$false, HelpMessage="Application object(s) to process. Required for 'Object' selection method.")]
+    [PSObject[]]$InputObject,
 
     [Parameter(Mandatory=$false, HelpMessage="The name of the Azure Key Vault for storing new credentials. Required if -OutputFile is not used.")]
     [string]$KeyVaultName,
@@ -135,6 +141,9 @@ if ($SelectionMethod -eq 'Tag' -and -not $TagName) {
 if ($SelectionMethod -eq 'File') {
     if (-not $InputFile) { throw "For 'File' selection method, you must provide an -InputFile." }
     if (-not (Test-Path $InputFile)) { throw "Input file not found at path: $InputFile" }
+}
+if ($SelectionMethod -eq 'Object' -and -not $InputObject) {
+    throw "For 'Object' selection method, you must provide -InputObject."
 }
 if (-not $KeyVaultName -and -not $OutputFile) {
     throw "You must specify a destination for new credentials. Use either -KeyVaultName or -OutputFile."
@@ -312,6 +321,30 @@ try {
                 }
             }
         }
+        'Object' {
+            Write-Log -Message "Identifying applications from provided InputObject."
+            foreach ($obj in $InputObject) {
+                try {
+                    if ($obj.Id) {
+                        Write-Log -Message "Looking up provided application by ObjectId: $($obj.Id)"
+                        $app = Get-MgApplication -ApplicationId $obj.Id -Property $properties -ErrorAction Stop
+                        $applicationsToScan += $app
+                    }
+                    elseif ($obj.AppId) {
+                        Write-Log -Message "Looking up provided application by AppId: $($obj.AppId)"
+                        $filter = "appId eq '$($obj.AppId)'"
+                        $foundApps = Get-MgApplication -Filter $filter -Property $properties -ErrorAction Stop
+                        if ($foundApps.Count -eq 1) { $applicationsToScan += $foundApps }
+                        elseif ($foundApps.Count -gt 1) { Write-Log -Message "Found multiple applications with AppId '$($obj.AppId)'. Skipping." -Level "WARN" }
+                    }
+                    else {
+                        Write-Log -Message "Provided object does not have an 'Id' or 'AppId' property. Skipping." -Level "WARN"
+                    }
+                } catch {
+                    Write-Log -Message "An error occurred while trying to find provided application. Error: $($_.Exception.Message). Skipping." -Level "ERROR"
+                }
+            }
+        }
         Default { # Expiration
             Write-Log -Message "Identifying applications with credentials expiring in $ExpirationDays days."
             $applicationsToScan = Get-MgApplication -All -Property $properties
@@ -326,14 +359,14 @@ try {
         $certsToRotate = @()
 
         if ($CredentialType -in 'Secret', 'Both') {
-            $secretsToRotate = if ($SelectionMethod -in 'Tag', 'File') {
+            $secretsToRotate = if ($SelectionMethod -in 'Tag', 'File', 'Object') {
                 $app.PasswordCredentials
             } else { # Expiration
                 $app.PasswordCredentials | Where-Object { $_.EndDateTime -lt $expirationThreshold -and $_.EndDateTime -gt (Get-Date).ToUniversalTime() }
             }
         }
         if ($CredentialType -in 'Certificate', 'Both') {
-            $certsToRotate = if ($SelectionMethod -in 'Tag', 'File') {
+            $certsToRotate = if ($SelectionMethod -in 'Tag', 'File', 'Object') {
                 $app.KeyCredentials
             } else { # Expiration
                 $app.KeyCredentials | Where-Object { $_.EndDateTime -lt $expirationThreshold -and $_.EndDateTime -gt (Get-Date).ToUniversalTime() }
@@ -341,8 +374,8 @@ try {
         }
         
         $hasCredentialsToRotate = ($secretsToRotate.Count -gt 0 -or $certsToRotate.Count -gt 0)
-        # We only consider generating new creds if the selection method is explicit (Tag or File)
-        $isCandidateForGeneration = ($GenerateNewIfMissing.IsPresent) -and ($SelectionMethod -in 'Tag', 'File')
+        # We only consider generating new creds if the selection method is explicit (Tag, File, or Object)
+        $isCandidateForGeneration = ($GenerateNewIfMissing.IsPresent) -and ($SelectionMethod -in 'Tag', 'File', 'Object')
 
         if ($hasCredentialsToRotate -or $isCandidateForGeneration) {
             Write-Log -Message "Queuing application '$($app.DisplayName)' for processing." -Level "INFO"
@@ -368,7 +401,7 @@ Write-Log -Message "Found $($appsToProcess.Count) applications with credentials 
 
 # --- Main Processing Loop ---
 foreach ($app in $appsToProcess) {
-    Write-Log -Message "Processing application: '$($app.DisplayName)' (App ID: $($app.Id))"
+    Write-Log -Message "Processing application: '$($app.DisplayName)' (Object ID: $($app.Id))"
     
     # Determine if we should process a secret for this app
     $processSecret = $false
@@ -404,7 +437,7 @@ foreach ($app in $appsToProcess) {
                 Write-Warning "SECURITY RISK: Storing secrets in a plain text file is not recommended for production environments. Ensure this file is properly secured and deleted after use."
                 $secretOutput = [PSCustomObject]@{
                     ApplicationName = $app.DisplayName
-                    ApplicationId   = $app.Id
+                    ObjectId        = $app.Id
                     SecretKeyId     = $newSecret.KeyId
                     SecretValue     = $newSecret.SecretText
                     CreatedDateUTC  = (Get-Date).ToUniversalTime().ToString('o')

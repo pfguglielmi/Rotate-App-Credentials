@@ -8,6 +8,7 @@ The script securely generates new credentials, stores them either in Azure Key V
   - **Expiration**: Target credentials expiring within a configurable number of days.
   - **Tagging**: Force an immediate rotation for any application with a specific tag.
   - **Input File**: Target a specific list of applications provided in a CSV file.
+  - **Object**: Target applications by passing one or an array of Application objects.
 - **Provisioning for Recovered Apps**: Generate initial secrets or certificates for applications that have none, perfect for post-recovery scenarios.
 - **Multiple Authentication Methods**: Run the script using various identities:
   - **Interactive**: For attended execution by a user or administrator with an interactive sign-in prompt.
@@ -185,13 +186,25 @@ This command generates a new secret for a tagged application that will only be v
     -SecretExpInMonths 12
 ~~~
 
+### Example 9: Rotating Credentials from Provided Objects
+This command targets applications that have been provided as objects (e.g., retrieved via `Get-MgApplication`).
+~~~powershell
+$myApps = Get-MgApplication -Filter "startswith(displayName, 'TestApp')"
+.\Rotate-App-Credentials.ps1 -SelectionMethod Object `
+    -InputObject $myApps `
+    -AuthMethod Interactive `
+    -CredentialType Secret `
+    -KeyVaultName "your-key-vault-name"
+~~~
+
 ## :gear: Parameter Reference
 The following table details all available parameters for the script.
 | Parameter                 | Type    | Description                                                                                   | Required? | Default Value        |
 |---------------------------|---------|-----------------------------------------------------------------------------------------------|-----------|----------------------|
-| `SelectionMethod`         | String  | How to identify apps. `Expiration` or `Tag`.                                                  | **Yes**   |                      |
+| `SelectionMethod`         | String  | How to identify apps. `Expiration`, `Tag`, `File`, or `Object`.                               | **Yes**   |                      |
 | `TagName`                 | String  | The tag to search for if `SelectionMethod` is `Tag`.                                          | No        |                      |
 | `InputFile`               | String  | Path to a CSV file with `ObjectId` and/or `AppId` columns. Required for File selection.       | No        |                      |
+| `InputObject`             | Array   | Application object(s) to process. Required for `Object` selection.                            | No        |                      |
 | `KeyVaultName`            | String  | Name of the Azure Key Vault. Required if `-OutputFile` is not used or for cert rotation.      | **Yes**   |                      |
 | `OutputFile`              | String  | Path to a local file to store new secrets as JSON. **WARNING**: Less secure than Key Vault.   | **Yes**   |                      |
 | `LogDirectory`            | String  | The local directory to store the log file.                                                    | No        | C:\temp\logs         |
