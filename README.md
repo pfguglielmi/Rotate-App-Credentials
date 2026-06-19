@@ -103,7 +103,7 @@ This example is ideal for an Azure Automation runbook. It rotates both secrets a
     -AuthMethod ManagedIdentity `
     -CredentialType Both `
     -KeyVaultName "prod-credential-vault" `
-    -RemoveOldCredential $true `
+    -RemoveOldCredential `
     -NotificationType Email `
     -EmailTo "security-admins@yourcompany.com" `
     -EmailFrom "automation@yourcompany.com" `
@@ -212,7 +212,7 @@ The following table details all available parameters for the script.
 | `ExpirationDays`          | Int     | The number of days to look ahead for expiring credentials.                                    | No        | 30                   |
 | `SecretExpInMonths`       | Int     | The validity period for new secrets, in months.                                               | No        | 6                   |
 | `GenerateNewIfMissing`    | Switch  | If specified, generates a new credential for a targeted app that has none.                    | No        | $false               |
-| `RemoveOldCredential`     | Boolean | If `$true`, the old credential will be deleted after rotation.                                | No        | $false               |
+| `RemoveOldCredential`     | Switch  | If specified, the old credential will be deleted after a successful rotation.                 | No        | (not set)            |
 | `AuthMethod`              | String  | Authentication method. `ManagedIdentity`, `ServicePrincipal`, or `Interactive`.               | **Yes**   |                      |
 | `TenantId`                | String  | Tenant ID, required for `ServicePrincipal` and `Interactive` authentication.                  | No        |                      |
 | `ClientId`                | String  | Client ID, required for `ServicePrincipal` authentication.                                    | No        |                      |
