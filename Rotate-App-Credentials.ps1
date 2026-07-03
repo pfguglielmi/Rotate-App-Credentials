@@ -36,7 +36,7 @@
 
 .NOTES
     Author: Pierre-François Guglielmi / Rubrik Speciality Engineering Team
-    Version: 3.2
+    Version: 3.3
     Created: 2025-08-27
     Prerequisites: Microsoft.Graph and Az.KeyVault modules.
 #>
@@ -80,8 +80,8 @@ param(
     [Parameter(Mandatory=$false, HelpMessage="If specified, the script will generate a new credential for an app that has none.")]
     [switch]$GenerateNewIfMissing,
 
-    [Parameter(Mandatory=$false, HelpMessage="If true, the script will delete the old credential.")]
-    [bool]$RemoveOldCredential = $false,
+    [Parameter(Mandatory=$false, HelpMessage="If specified, the script will delete the old credential after a successful rotation.")]
+    [switch]$RemoveOldCredential,
 
     # --- Authentication Parameters ---
     [Parameter(Mandatory=$true, HelpMessage="Authentication method. Options are ManagedIdentity, ServicePrincipal, or Interactive")]
@@ -106,7 +106,7 @@ param(
     [ValidateSet(2048, 3072, 4096)]
     [int]$CertKeyLength = 2048,
 
-    [Parameter(Mandatory=$false, HelpMessage="Hash algorithm for new certificates. Options are SHA256, SHA384 or SHA512. Defaut is SHA256")]
+    [Parameter(Mandatory=$false, HelpMessage="Hash algorithm for new certificates. Options are SHA256, SHA384 or SHA512. Default is SHA256")]
     [ValidateSet('SHA256', 'SHA384', 'SHA512')]
     [string]$CertHashAlgorithm = 'SHA256',
 
@@ -114,7 +114,7 @@ param(
     [string]$CertStoreLocation = 'Cert:\CurrentUser\My',
 
     # --- Notification Parameters ---
-    [Parameter(Mandatory=$false, HelpMessage="Notification channel. Options are Teams, Email or Both. Default is None")]
+    [Parameter(Mandatory=$false, HelpMessage="Notification channel. Options are Teams, Email or None. Default is None")]
     [ValidateSet('Teams', 'Email', 'None')]
     [string]$NotificationType = 'None',
 
@@ -184,14 +184,13 @@ function Write-Log {
 function Send-Notification {
     param([string]$Title, [string]$Message, [string]$Status)
     
-    if ($NotificationType -eq 'None') {
-        Write-Log -Message "Notifications are disabled." -Level "WARN"
-        return
-    }
+    if ($NotificationType -eq 'None') { return }
 
     Write-Log -Message "Sending notification via $NotificationType..."
     switch ($NotificationType) {
         'Teams' {
+            # NOTE: Office 365 Connectors (MessageCard format) are being retired by Microsoft.
+            # Consider migrating to Power Automate workflows with Adaptive Cards for long-term support.
             $color = @{"good"="00FF00"; "warning"="FFFF00"; "danger"="FF0000"}[$Status]
             $payload = @{
                 "@type" = "MessageCard"; themeColor = $color; summary = $Title
@@ -202,6 +201,7 @@ function Send-Notification {
         }
         'Email' {
             $body = $Message -replace '\n', '<br>'
+            # NOTE: Send-MailMessage is marked obsolete in PowerShell 7+. Replace with System.Net.Mail.SmtpClient if deprecation warnings are a concern.
             try { Send-MailMessage -To $EmailTo -From $EmailFrom -Subject $Title -Body $body -SmtpServer $SmtpServer -BodyAsHtml }
             catch { Write-Log -Message "Failed to send email notification: $($_.Exception.Message)" -Level "ERROR" }
         }
@@ -211,12 +211,23 @@ function Send-Notification {
 function Test-MgGraphPermissions {
     param(
         [Parameter(Mandatory=$true)]
-        [string[]]$RequiredPermissions
+        [string[]]$RequiredPermissions,
+        [Parameter(Mandatory=$true)]
+        [string]$AuthMethod
     )
 
     Write-Log -Message "Verifying required API permissions..."
+
+    # App-only auth methods (ManagedIdentity, ServicePrincipal) receive permissions as token roles,
+    # not delegated scopes. Get-MgContext.Scopes is empty for these, so scope verification would
+    # always report all permissions as missing. Trust that the admin granted the correct app roles.
+    if ($AuthMethod -ne 'Interactive') {
+        Write-Log -Message "Using app-only authentication ($AuthMethod). Skipping delegated-scope verification — ensure app roles Directory.Read.All and Application.ReadWrite.All are granted in Entra ID."
+        return
+    }
+
     $context = Get-MgContext
-    $grantedScopes = $context.Scopes
+    $grantedScopes = if ($context) { $context.Scopes } else { @() }
 
     $missingPermissions = @()
     foreach ($permission in $RequiredPermissions) {
@@ -227,7 +238,6 @@ function Test-MgGraphPermissions {
 
     if ($missingPermissions.Count -gt 0) {
         $errorMessage = "The authenticated principal is missing the following required Microsoft Graph permissions: $($missingPermissions -join ', '). Please grant these permissions and try again."
-        # This will be caught by the main try/catch block
         throw $errorMessage
     }
 
@@ -243,6 +253,7 @@ function Test-MgGraphPermissions {
 if (-not (Test-Path $LogDirectory)) { New-Item -Path $LogDirectory -ItemType Directory | Out-Null }
 $successes = [System.Collections.ArrayList]@()
 $failures = [System.Collections.ArrayList]@()
+$secretOutputList = [System.Collections.ArrayList]@()
 
 Write-Log -Message "Starting Entra ID Application Credential Rotation Script."
 Write-Log -Message "Selection Method: $SelectionMethod"
@@ -263,7 +274,7 @@ try {
     Write-Log -Message "Connection successful."
 
     # --- Verify Permissions ---
-    Test-MgGraphPermissions -RequiredPermissions $requiredPermissions
+    Test-MgGraphPermissions -RequiredPermissions $requiredPermissions -AuthMethod $AuthMethod
 }
 catch {
     $errorMessage = "Failed during connection or permission check. Error: $($_.Exception.Message)"
@@ -283,7 +294,7 @@ try {
         }
         'File' {
             Write-Log -Message "Identifying applications from input file: '$InputFile'"
-            $inputFileData = Import-Csv -Path $InputFile -Delimiter ';' | Select-Object ObjectId, AppId
+            $inputFileData = Import-Csv -Path $InputFile | Select-Object ObjectId, AppId
             foreach ($row in $inputFileData) {
                 $app = $null
                 $objectId = $row.ObjectId
@@ -361,15 +372,15 @@ try {
         if ($CredentialType -in 'Secret', 'Both') {
             $secretsToRotate = if ($SelectionMethod -in 'Tag', 'File', 'Object') {
                 $app.PasswordCredentials
-            } else { # Expiration
-                $app.PasswordCredentials | Where-Object { $_.EndDateTime -lt $expirationThreshold -and $_.EndDateTime -gt (Get-Date).ToUniversalTime() }
+            } else { # Expiration — include already-expired credentials so broken apps are also fixed
+                $app.PasswordCredentials | Where-Object { $_.EndDateTime -lt $expirationThreshold }
             }
         }
         if ($CredentialType -in 'Certificate', 'Both') {
             $certsToRotate = if ($SelectionMethod -in 'Tag', 'File', 'Object') {
                 $app.KeyCredentials
-            } else { # Expiration
-                $app.KeyCredentials | Where-Object { $_.EndDateTime -lt $expirationThreshold -and $_.EndDateTime -gt (Get-Date).ToUniversalTime() }
+            } else { # Expiration — include already-expired credentials so broken apps are also fixed
+                $app.KeyCredentials | Where-Object { $_.EndDateTime -lt $expirationThreshold }
             }
         }
         
@@ -405,8 +416,9 @@ foreach ($app in $appsToProcess) {
     
     # Determine if we should process a secret for this app
     $processSecret = $false
+    $explicitSelection = $SelectionMethod -in 'Tag', 'File', 'Object'
     if ($CredentialType -in 'Secret', 'Both') {
-        if (($app.SecretsToRotate.Count -gt 0) -or ($GenerateNewIfMissing.IsPresent -and $app.PasswordCredentials.Count -eq 0)) {
+        if (($app.SecretsToRotate.Count -gt 0) -or ($GenerateNewIfMissing.IsPresent -and $explicitSelection -and $app.PasswordCredentials.Count -eq 0)) {
             $processSecret = $true
         }
     }
@@ -414,7 +426,7 @@ foreach ($app in $appsToProcess) {
     # Determine if we should process a certificate for this app
     $processCert = $false
     if ($CredentialType -in 'Certificate', 'Both') {
-        if (($app.CertsToRotate.Count -gt 0) -or ($GenerateNewIfMissing.IsPresent -and $app.KeyCredentials.Count -eq 0)) {
+        if (($app.CertsToRotate.Count -gt 0) -or ($GenerateNewIfMissing.IsPresent -and $explicitSelection -and $app.KeyCredentials.Count -eq 0)) {
             $processCert = $true
         }
     }
@@ -442,11 +454,12 @@ foreach ($app in $appsToProcess) {
                     SecretValue     = $newSecret.SecretText
                     CreatedDateUTC  = (Get-Date).ToUniversalTime().ToString('o')
                 }
-                $secretOutput | ConvertTo-Json | Add-Content -Path $OutputFile
-                Write-Log -Message "  -> New secret appended to file: $OutputFile."
+                [void]$secretOutputList.Add($secretOutput)
+                Write-Log -Message "  -> New secret queued for output file: $OutputFile."
             }
             else {
-                $secretName = "$($app.DisplayName -replace '[^a-zA-Z0-9-]', '-')-secret"
+                $secretName = (($app.DisplayName -replace '[^a-zA-Z0-9-]', '-').Trim('-')) + "-secret"
+                if ($secretName.Length -gt 127) { $secretName = $secretName.Substring(0, 127).TrimEnd('-') }
                 Set-AzKeyVaultSecret -VaultName $KeyVaultName -Name $secretName -SecretValue (ConvertTo-SecureString $newSecret.SecretText -AsPlainText -Force)
                 Write-Log -Message "  -> New secret stored in Key Vault as '$secretName'."
             }
@@ -469,59 +482,100 @@ foreach ($app in $appsToProcess) {
     if ($processCert) {
         $action = if ($app.KeyCredentials.Count -eq 0) { "Generating" } else { "Rotating" }
         Write-Log -Message "  -> $action certificate..."
+        $cert = $null
+        $tempPfxPath = $null
         try {
-            # Generate and add a new certificate using specified parameters
+            # Generate a new self-signed certificate in the local cert store
             $certParams = @{
-                Subject = "CN=$($app.DisplayName)"
+                Subject           = "CN=$($app.DisplayName)"
                 CertStoreLocation = $CertStoreLocation
-                KeyExportPolicy = 'Exportable'
-                KeySpec = 'Signature'
-                KeyAlgorithm = $CertKeyAlgorithm
-                KeyLength = $CertKeyLength
-                HashAlgorithm = $CertHashAlgorithm
+                KeyExportPolicy   = 'Exportable'
+                KeySpec           = 'Signature'
+                KeyAlgorithm      = $CertKeyAlgorithm
+                KeyLength         = $CertKeyLength
+                HashAlgorithm     = $CertHashAlgorithm
+                NotAfter          = (Get-Date).AddYears(2)
             }
             $cert = New-SelfSignedCertificate @certParams
-            
-            $keyCredential = @{ Type = 'AsymmetricX509Cert'; Usage = 'Verify'; Key = $cert.RawData }
-            Add-MgApplicationKey -ApplicationId $app.Id -KeyCredential $keyCredential -Proof "nonce"
-            Write-Log -Message "  -> New certificate added to Entra application."
 
-            # Store the certificate with its private key in Key Vault
-            $certName = "$($app.DisplayName -replace '[^a-zA-Z0-9-]', '-')-cert"
-            $kvCert = Import-AzureKeyVaultCertificate -VaultName $KeyVaultName -Name $certName -FilePath $cert.PSPath
-            Write-Log -Message "  -> New certificate with private key stored in Key Vault as '$($kvCert.Name)'."
-            Remove-Item -Path $cert.PSPath # Clean up local cert store
-
-            # Then remove the old credentials if enabled
-            if ($RemoveOldCredential -and $app.CertsToRotate.Count -gt 0) {
-                $app.CertsToRotate | ForEach-Object {
-                    Write-Log -Message "  -> Removing old certificate (Key ID: $($_.KeyId))" -Level "WARN"
-                    Remove-MgApplicationKey -ApplicationId $app.Id -KeyId $_.KeyId
-                }
+            # Build the new key credential object (public key only)
+            $newKeyCredential = @{
+                Type          = 'AsymmetricX509Cert'
+                Usage         = 'Verify'
+                Key           = $cert.RawData
+                DisplayName   = "AutoRotated-Cert-$(Get-Date -Format 'yyyy-MM-dd')"
+                StartDateTime = (Get-Date).ToUniversalTime()
+                EndDateTime   = $cert.NotAfter.ToUniversalTime()
             }
+
+            # Use Update-MgApplication to set key credentials. This replaces the entire keyCredentials
+            # collection and does not require a proof-of-possession JWT (unlike Add-MgApplicationKey).
+            # Existing credentials to keep are passed back by including them in the combined list;
+            # the Graph API preserves certs with known keyIds even when their Key bytes are null.
+            $keysToKeep = if ($RemoveOldCredential -and $app.CertsToRotate.Count -gt 0) {
+                $oldKeyIds = $app.CertsToRotate | ForEach-Object { $_.KeyId }
+                $app.KeyCredentials | Where-Object { $oldKeyIds -notcontains $_.KeyId }
+            } else {
+                $app.KeyCredentials
+            }
+            $updatedCreds = @($keysToKeep) + @($newKeyCredential)
+            Update-MgApplication -ApplicationId $app.Id -KeyCredentials $updatedCreds
+
+            if ($RemoveOldCredential -and $app.CertsToRotate.Count -gt 0) {
+                Write-Log -Message "  -> New certificate added and $($app.CertsToRotate.Count) old certificate(s) removed in Entra application." -Level "WARN"
+            } else {
+                Write-Log -Message "  -> New certificate added to Entra application."
+            }
+
+            # Export to a temporary PFX file (with a random password) for Key Vault import
+            $certName = (($app.DisplayName -replace '[^a-zA-Z0-9-]', '-').Trim('-')) + "-cert"
+            if ($certName.Length -gt 127) { $certName = $certName.Substring(0, 127).TrimEnd('-') }
+            $pfxPasswordBytes = [byte[]]::new(32)
+            [System.Security.Cryptography.RandomNumberGenerator]::Fill($pfxPasswordBytes)
+            $pfxPassword = ([System.Convert]::ToBase64String($pfxPasswordBytes)) | ConvertTo-SecureString -AsPlainText -Force
+            $tempPfxPath = [System.IO.Path]::Combine([System.IO.Path]::GetTempPath(), "$($app.Id).pfx")
+            $cert | Export-PfxCertificate -FilePath $tempPfxPath -Password $pfxPassword | Out-Null
+
+            $kvCert = Import-AzKeyVaultCertificate -VaultName $KeyVaultName -Name $certName -FilePath $tempPfxPath -Password $pfxPassword
+            Write-Log -Message "  -> New certificate with private key stored in Key Vault as '$($kvCert.Name)'."
+
             [void]$successes.Add("Processed Certificate for $($app.DisplayName)")
         } catch {
             $errorMessage = "Failed to process certificate for '$($app.DisplayName)'. Error: $($_.Exception.Message)"
             Write-Log -Message $errorMessage -Level "ERROR"; [void]$failures.Add($errorMessage)
+        } finally {
+            # Always clean up local artifacts regardless of success or failure
+            if ($tempPfxPath -and (Test-Path $tempPfxPath)) { Remove-Item -Path $tempPfxPath -Force -ErrorAction SilentlyContinue }
+            if ($cert) { Remove-Item -Path $cert.PSPath -DeleteKey -ErrorAction SilentlyContinue }
         }
     }
+}
+
+# --- Write output file as a valid JSON array (done here so a single run produces one clean file) ---
+if ($secretOutputList.Count -gt 0 -and $PSBoundParameters.ContainsKey('OutputFile')) {
+    $secretOutputList | ConvertTo-Json | Set-Content -Path $OutputFile
+    Write-Log -Message "New secrets written to output file: $OutputFile ($($secretOutputList.Count) entries)."
 }
 
 # --- Final Summary and Notification ---
 Write-Log -Message "Script finished processing."
 $summaryTitle = "Entra ID Credential Rotation: Summary"
-$summaryMessage = "Processed $($appsToProcess.Count) applications.`n`n"
 $summaryStatus = "good"
 
+# Plain text for the log file; markdown for the notification channel
+$summaryLog = "Processed $($appsToProcess.Count) application(s). Successes: $($successes.Count). Failures: $($failures.Count)."
+$summaryNotification = "Processed $($appsToProcess.Count) application(s).`n`n"
+
 if ($successes.Count -gt 0) {
-    $summaryMessage += "**✅ Successes ($($successes.Count)):**`n - $($successes -join "`n - ")"
+    $summaryNotification += "**Successes ($($successes.Count)):**`n - $($successes -join "`n - ")"
 }
 if ($failures.Count -gt 0) {
     $summaryStatus = "danger"
-    $summaryMessage += "`n`n**❌ Failures ($($failures.Count)):**`n - $($failures -join "`n - ")"
+    $summaryLog += " Failed apps: $($failures -join '; ')"
+    $summaryNotification += "`n`n**Failures ($($failures.Count)):**`n - $($failures -join "`n - ")"
 }
 
-Write-Log -Message $summaryMessage
-Send-Notification -Title $summaryTitle -Message $summaryMessage -Status $summaryStatus
+Write-Log -Message $summaryLog
+Send-Notification -Title $summaryTitle -Message $summaryNotification -Status $summaryStatus
 
 Write-Log -Message "Script execution complete."
